@@ -1,0 +1,3 @@
+[submodule "web/vendor/compost"]
+	path = web/vendor/compost
+	url = https://github.com/charCulbert/compost.git

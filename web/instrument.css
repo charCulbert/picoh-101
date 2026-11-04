@@ -1,0 +1,303 @@
+/* The panel, after the SH-101, measured from a top-down photo of one (570 x 311 mm). One em is a
+   ninety-eighth of the panel's width, about 5.8 mm on the real one, so every size below is the real
+   size in mm divided by 5.8:
+     case 570 x 311 mm                       98 x 53.5 em
+     top deck (rear strip, sections) 120 mm  3.4 + 17 em
+     button row over the keys 42 mm          7.2 em
+     keys 450 x 145 mm (32, F to C)          about 78 x 24 em, 79% of the width
+     controllers, lower left 88 mm           15 em
+     fader slots 55 mm, 15 mm apart          9.4 em, 2.6 em
+     TUNE knob 26 mm, others 20 mm           4.5 em, 3.4 em
+     buttons 13 x 6 mm, 17 mm apart          2.2 x 1 em, 2.9 em
+     "SH-101" name 85 x 22 mm                about 15 x 3.8 em
+   Squared throughout, as the case is. Colours in light-dark() pairs; type is Schibsted Grotesk and IBM
+   Plex Mono. */
+@font-face { font-family: 'Schibsted Grotesk'; font-weight: 400 500; src: url(fonts/schibsted-grotesk.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; src: url(fonts/ibm-plex-mono-400.woff2) format('woff2'); }
+:root {
+    color-scheme: light dark;
+    --bg: light-dark(#ecedea, #0a0b0c);
+    --case: light-dark(#c4c6c1, #202224);          /* the panel's grey */
+    --case-deep: light-dark(#b7b9b4, #18191b);     /* the rear strip, a shade lower */
+    --slot: light-dark(#4c4f4b, #050606);          /* fader slots */
+    --cap: light-dark(#1a1c1d, #0b0b0c);           /* fader caps and knobs */
+    --silk: light-dark(#141516, #eceded);          /* silkscreen */
+    --silk-dim: light-dark(#3f4346, #9a9da0);
+    --sel: light-dark(#276fae, #6aa9e0);           /* what is active */
+    --led: light-dark(#d4271b, #ff4a3d);           /* the LEDs */
+    --cap-line: #e6e7e3;                           /* the line on a cap */
+    --knob-arc: light-dark(#2a2c2e, #b4b7b9);
+    --val: light-dark(#76500f, #e6c28c);           /* figures are warm */
+    --over: light-dark(#a9531f, #d98a4a);
+    --ink: light-dark(#171819, #e9eaeb); --ink2: light-dark(#343638, #cacccd);
+    --dim: light-dark(#5c6063, #8c8f92); --faint: light-dark(#62666a, #767a7e);
+    --ghost: light-dark(#bfc1bf, #323437);
+    --hl: light-dark(rgba(0, 0, 0, .05), rgba(255, 255, 255, .06));
+    --edge: light-dark(rgba(0, 0, 0, .35), rgba(255, 255, 255, .15));
+    --rule: light-dark(rgba(0, 0, 0, .22), rgba(255, 255, 255, .13));
+    --button: light-dark(#e9eae6, #c9ccc9);        /* the pale push buttons */
+    --panel: var(--bg);
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --ui: 'Schibsted Grotesk', system-ui, sans-serif; --uiLS: .006em;
+    --compost-accent: var(--sel);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { font-size: 12px; touch-action: manipulation; }
+body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 400 1rem/1.4 var(--ui); letter-spacing: var(--uiLS); font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* No taller than the window: the header and status bar take about 9rem. */
+#instrument { container-type: inline-size; width: 100%; max-width: calc((100vh - 9rem) * 570 / 311); min-width: min(100%, 880px); margin: 0 auto; }
+.sh {
+    font-size: calc(100cqi / 98);
+    aspect-ratio: 570 / 311;
+    display: grid;
+    grid-template-columns: 15em minmax(0, 1fr);
+    grid-template-rows: 3.4em minmax(0, 1fr) 7.2em 24em;
+    column-gap: 1.2em;
+    padding: 0 1.3em 1em;
+    background: var(--case); color: var(--silk);
+    border: 1px solid var(--edge);
+    font-family: var(--ui); letter-spacing: var(--uiLS);
+}
+.band { grid-column: 1 / -1; margin: 0 -1.3em; background: var(--case-deep); border-bottom: 1px solid var(--rule); }
+.top { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: stretch; padding-top: .9em; min-height: 0; }
+.buttons { grid-column: 2; display: flex; align-items: center; gap: 2.4em; }
+.controllers { grid-column: 1; grid-row: 4; }
+.keys-side { grid-column: 2; grid-row: 4; min-width: 0; }
+
+/* The sections: a name over a rule, the controls under it, a thin line between sections. */
+.sect { display: grid; grid-template-rows: 1.8em 1fr; padding: 0 .5em; border-left: 1px solid var(--rule); min-width: 0; }
+.top .sect:first-child { border-left: 0; padding-left: 0; }
+.sect h3 {
+    margin: 0; align-self: start; padding-bottom: .2em; border-bottom: 1.5px solid var(--silk);
+    font-size: 1em; font-weight: 500; letter-spacing: .12em; text-align: center; white-space: nowrap; color: var(--silk);
+}
+.sect h3:empty { border-bottom: 0; }
+.row { display: flex; gap: 0; align-items: flex-start; justify-content: center; padding-top: .7em; }
+
+/* A control: its printed name above, then the Compost element. */
+.ctl { display: grid; justify-items: center; align-content: start; gap: .45em; min-width: 2.6em; transition: background .5s; }
+.ctl > small {
+    min-height: 2.2em; display: flex; align-items: flex-end; justify-content: center;
+    font-size: .82em; font-weight: 500; letter-spacing: .04em; color: var(--silk); text-align: center; line-height: 1.1; max-width: 6.5em;
+}
+.ctl > small svg { width: 2em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.ctl.moved { background: color-mix(in srgb, var(--sel) 22%, transparent); transition: none; }
+
+/* Faders: a scale printed either side of a dark slot, a black cap with a white line. The values show
+   in the status bar, as the panel has no display. */
+/* The scale hangs outside the layout, so the name centres on the slot. */
+.fader { position: relative; display: block; }
+/* Half a cap above and below the slot: at either end of its travel the cap's centre is on the slot's
+   end, so the cap would otherwise run into the name above or the deck below. */
+.fader compost-slider { margin: .85em 0; }
+.scale {
+    position: absolute; right: calc(50% + .35em); top: 1.7em; bottom: 1.7em; width: .35em;
+    background: repeating-linear-gradient(to bottom, var(--silk-dim) 0 1px, transparent 1px calc(100% / 10 - .01px));
+    border-bottom: 1px solid var(--silk-dim);
+}
+.scale::after { content: ""; position: absolute; inset: 0 auto -1px calc(100% + .7em); width: 100%; background: inherit; border-bottom: inherit; }
+compost-slider {
+    font-size: 1em; color: var(--silk);
+    --slider-vertical-length: 10.6em; --slider-vertical-width: 1.6em; --slider-thumb-size: 1.7em; --slider-track-height: .4em;
+}
+compost-slider::part(label), compost-slider::part(value) { display: none; }
+compost-slider::part(track) { background: var(--slot); border-radius: 0; }
+compost-slider::part(fill) { display: none; }
+compost-slider::part(thumb) {
+    width: 1.25em; height: 1.7em; border-radius: 0; border: 0;
+    background: linear-gradient(var(--cap) 0 44%, var(--cap-line) 44% 56%, var(--cap) 56%);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+}
+
+/* Switches: a small square button that steps through the positions printed beside it; the current
+   position is lit, and any printed position can be clicked. */
+.switch { display: flex; align-items: center; gap: .35em; padding-top: .3em; }
+.switch compost-button { --compost-button-size: 1.3em; }
+.switch compost-button::part(button) {
+    width: 1.3em; height: 1.3em; border-radius: 0; background: var(--cap);
+    border: 1px solid rgba(0, 0, 0, .5); box-shadow: 0 1px 0 rgba(0, 0, 0, .35);
+}
+.switch compost-button::part(button):active { transform: translateY(1px); box-shadow: none; }
+.switch compost-button::part(label) { display: none; }
+.marks { display: grid; gap: .2em; }
+.marks button {
+    appearance: none; display: flex; align-items: center; gap: .35em; padding: 0; margin: 0;
+    background: none; border: 0; border-radius: 0; cursor: pointer;
+    font: 500 .7em/1 var(--ui); letter-spacing: .03em; color: var(--silk-dim); white-space: nowrap; text-align: left;
+}
+.marks button::before { content: ""; flex: none; width: .55em; height: .55em; background: color-mix(in srgb, var(--led) 15%, var(--cap)); }
+.marks button.on { color: var(--silk); }
+.marks button.on::before { background: var(--led); box-shadow: 0 0 .4em var(--led); }
+.marks button:hover { color: var(--silk); }
+/* Horizontal switches (portamento, transpose): positions printed under. */
+.switch-h { flex-direction: column; align-items: center; gap: .3em; }
+.switch-h .marks { display: flex; gap: .55em; }
+.switch-h .marks button { flex-direction: column-reverse; gap: .2em; }
+.switch-h compost-button::part(button) { width: 2.6em; height: 1.1em; }
+.ctl-switch { margin-right: .3em; }
+
+/* Knobs: Compost's own, as they come. The name is printed above (as on the panel) and the value
+   shows in the status bar, so only the dial is kept. */
+compost-knob { font-size: 1em; color: var(--silk); --knob-dial-size: 3.6em; --compost-accent: var(--knob-arc); }
+compost-knob::part(label), compost-knob::part(value) { display: none; }
+/* The focus ring hugs the dial, clear of the marks printed round it. */
+compost-knob { border-radius: 50%; }
+compost-knob:focus-visible { outline-width: 1px; outline-offset: 1px; }
+.sect[data-section="TUNE"] compost-knob { --knob-dial-size: 4.8em; }
+/* A selector knob as printed: no ring, a short tick and a mark over each position. */
+.dial { position: relative; display: block; margin-top: 1.9em; }
+.ctl:has(> .dial) { padding-right: 1.4em; }
+.dial compost-knob::part(ring) { visibility: hidden; }
+.dial i { position: absolute; left: 50%; top: 50%; width: 1px; height: .4em; background: var(--silk); transform-origin: 0 0; transform: rotate(var(--angle)) translateY(-2.25em); }
+.dial button { all: unset; position: absolute; transform: translate(-50%, -50%); cursor: pointer; color: var(--silk); line-height: 1; }
+.dial button.right { transform: translate(-.3em, -50%); }
+.dial button span { display: block; font-size: .6em; font-weight: 500; letter-spacing: .04em; white-space: nowrap; }
+.dial button svg { display: block; width: 1.3em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+/* The button row over the keys: LED, pale button, names, and a bracket under each group. */
+.grp { display: grid; justify-items: stretch; gap: .25em; }
+.grp .row { padding: 0; gap: .7em; align-items: flex-start; }
+.bracket {
+    font-size: .72em; font-weight: 500; letter-spacing: .1em; text-align: center; color: var(--silk);
+    border-top: 1px solid var(--silk); padding-top: .15em;
+}
+.ctl-button { gap: .3em; min-width: 2.2em; }
+.ctl-button > small { display: block; min-height: 0; order: 3; font-size: .68em; line-height: 1.15; max-width: 8em; }
+.ctl-button .second { color: var(--silk-dim); }
+.led { width: .6em; height: .6em; background: color-mix(in srgb, var(--led) 15%, var(--cap)); border: 1px solid var(--silk-dim); }
+.ctl-button:has(compost-button[pressed]) .led, .ctl-button.lit .led { background: var(--led); box-shadow: 0 0 .5em var(--led); }
+.ctl-button.down compost-button::part(button) { transform: translateY(1px); box-shadow: none; }
+compost-button { --compost-button-size: 1em; }
+compost-button::part(button) {
+    width: 2.2em; height: 1em; border-radius: 0; background: var(--button);
+    border: 1px solid rgba(0, 0, 0, .45); box-shadow: 0 1px 0 rgba(0, 0, 0, .35);
+}
+compost-button[pressed]::part(button) { background: var(--button); transform: translateY(1px); box-shadow: none; }
+.logo {
+    margin-left: auto; align-self: center;
+    font-size: 2.7em; font-weight: 500; letter-spacing: .03em; line-height: 1; color: var(--silk); white-space: nowrap;
+}
+
+/* The lower left, placed as in a photo of the panel (88 mm wide, 15 em): VOLUME over the bender's
+   VCO and VCF sliders, PORTAMENTO over the switches, the LFO MOD slider between, and the lever
+   under it. The printed lines are borders: the bracket under VCO and VCF, the arrow up from the lever to LFO
+   MOD, the line from the PORTAMENTO knob to its switch, the lever's double arrow. */
+.controllers {
+    display: grid; grid-template-columns: 6.2em 2.8em 1fr; grid-template-rows: auto auto minmax(1em, 1fr) auto;
+    column-gap: .2em; row-gap: .4em; padding-top: .4em;
+    --line: 1.5px solid var(--silk);
+}
+.c-volume { grid-area: 1 / 1; justify-self: center; }
+.c-portamento { grid-area: 1 / 3; justify-self: center; }
+.controllers compost-slider { --slider-vertical-length: 6.2em; }
+.under-label { font-size: .72em; font-weight: 500; letter-spacing: .1em; color: var(--silk); text-align: center; line-height: 1; }
+
+.c-bend { grid-area: 2 / 1; display: grid; justify-items: center; align-content: start; }
+.c-bend-faders { display: flex; gap: .6em; }
+.bracket-u { justify-self: stretch; margin: -.2em 1.3em .3em; height: .5em; border: var(--line); border-top: 0; }
+
+.c-lfo { grid-area: 2 / 2; justify-self: center; }
+
+.c-arrow { grid-area: 3 / 2; justify-self: center; position: relative; width: 0; border-left: var(--line); margin-bottom: -.4em; }
+.c-arrow::before {
+    content: ""; position: absolute; top: 0; left: calc(-.3em - .75px);
+    border: .3em solid transparent; border-top: 0; border-bottom: .5em solid var(--silk);
+}
+
+.c-switches { grid-area: 2 / 3; position: relative; display: grid; justify-items: center; align-content: start; gap: .9em; padding-top: .3em; }
+.c-switches > .link-down { position: absolute; left: 50%; top: -.4em; height: .7em; border-left: var(--line); }
+.ctl-switch-h > small { order: 3; min-height: 0; }
+.ctl-switch-h .marks { order: -1; }
+.c-switches .ctl-switch-h:first-of-type .marks { position: relative; padding-top: .55em; }
+.c-switches .ctl-switch-h:first-of-type .marks::before {
+    content: ""; position: absolute; left: .25em; right: .25em; top: 0; height: .35em; border: var(--line); border-bottom: 0;
+}
+
+.c-lever { grid-area: 4 / 2; justify-self: center; }
+.lever { display: grid; justify-items: center; gap: .25em; width: 7.4em; }
+/* The lever: a recessed plate with a slot across it, a stem from a pivot below, and a handle like a
+   fader cap. */
+.lever-track {
+    position: relative; width: 7.4em; height: 3em; border-radius: .35em; touch-action: none; cursor: grab;
+    background: linear-gradient(color-mix(in srgb, var(--case) 55%, #000), color-mix(in srgb, var(--case) 72%, #000));
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6);
+}
+.lever-track:active { cursor: grabbing; }
+.lever-slot { position: absolute; left: 8%; right: 8%; top: 72%; height: .3em; margin-top: -.15em; border-radius: .15em; background: #000; }
+.lever-stem { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.lever-stem line { stroke: var(--cap); stroke-width: .35em; stroke-linecap: round; }
+.lever-thumb {
+    position: absolute; width: 1.5em; height: 1.3em; transform: translate(-50%, -50%); pointer-events: none;
+    border-radius: .25em .25em .15em .15em;
+    background: linear-gradient(var(--cap) 0 40%, var(--cap-line) 40% 56%, var(--cap) 56%);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+.lever-arrow { position: relative; width: 100%; height: 0; border-top: var(--line); margin-top: .2em; }
+.lever-arrow::before, .lever-arrow::after {
+    content: ""; position: absolute; top: calc(-.3em - .75px); border: .3em solid transparent;
+}
+.lever-arrow::before { left: 0; border-left: 0; border-right: .5em solid var(--silk); }
+.lever-arrow::after { right: 0; border-right: 0; border-left: .5em solid var(--silk); }
+
+/* The keys fill their row: 32 of them over 79% of the width, as on the panel. */
+.keys { display: block; height: 100%; --compost-piano-height: 100%; --compost-piano-accent: var(--sel); --compost-piano-line: rgba(0, 0, 0, .35); }
+.keys::part(label) { display: none; }
+
+/* A phone held sideways (or any short, wide window): the whole panel, scaled to fit, without its rear
+   strip. How the synth is reached goes beside the logo, where the header and status bar would be. */
+.band { font-size: .8em; }
+.reach { display: none; }
+@media (orientation: landscape) and (max-height: 520px) {
+    .band { display: none; }
+    .sh { aspect-ratio: 570 / 291.2; grid-template-rows: minmax(0, 1fr) 7.2em 24em; } /* 311 less the 3.4em band */
+    .controllers, .keys-side { grid-row: 3; }
+    .reach {
+        display: grid; justify-items: end; gap: 2px; margin-left: auto; min-width: 0;
+        font: 400 11px/1.2 var(--mono); letter-spacing: 0; color: var(--silk-dim); white-space: nowrap;
+    }
+    .reach > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .reach + .logo { margin-left: 0; }
+    #instrument {
+        max-width: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 8px) * 570 / 291.2);
+        min-width: 0;
+    }
+}
+
+/* A narrow, tall window: the sections in three rows in the panel's order, larger faders, and the keys
+   held at the bottom. A phone held sideways is narrow but short, and gets the whole panel (above). */
+@media (max-width: 700px) and (min-height: 521px) {
+    .sh { aspect-ratio: auto; font-size: calc(100cqi / 36); display: block; padding: .8em .8em 1.2em; }
+    .band, .logo { display: none; }
+    .top { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1.4em .3em; padding-top: 0; }
+    .top .sect { border-left: 0; padding: 0 .2em; }
+    .top .sect:first-child { padding-left: .2em; }
+    .sect[data-section="TUNE"] { grid-column: span 2; }
+    .sect[data-section="MODULATOR"] { grid-column: span 4; }
+    .sect[data-section="VCO"] { grid-column: span 6; }
+    .sect[data-section="SOURCE MIXER"] { grid-column: span 8; }
+    .sect[data-section="VCA"] { grid-column: span 4; }
+    .sect[data-section="VCF"] { grid-column: span 5; }
+    .sect[data-section="ENV"] { grid-column: span 7; }
+    .top compost-slider { --slider-vertical-length: 8.5em; --slider-vertical-width: 2.2em; }
+    compost-slider::part(thumb) { width: 1.6em; height: 2em; }
+    .ctl { min-width: 2.4em; }
+    .sect[data-section="TUNE"] compost-knob { --knob-dial-size: 3.6em; }
+    .buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 1em 1.6em; padding: 1.6em 0 1.2em; margin-top: 1.2em; border-top: 1px solid var(--rule); }
+    .controllers { width: 17em; margin: 0 auto; }
+    /* The keys: fixed above the status bar, fewer and wider (instrument.ts). */
+    .keys-side {
+        position: fixed; z-index: 3; left: 0; right: 0; bottom: var(--status-height, 3rem); height: 24vh;
+        padding: .5rem max(8px, env(safe-area-inset-right)) .5rem max(8px, env(safe-area-inset-left));
+        background: var(--case); border-top: 1px solid var(--edge);
+    }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

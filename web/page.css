@@ -1,0 +1,100 @@
+/* The page around the panel: a small header, a notice when the synth
+   doesn't answer, and a status bar along the bottom as in the DAW's transport. */
+[hidden] { display: none !important; }
+main { max-width: 128rem; margin: 0 auto; padding: max(1.5rem, calc(env(safe-area-inset-top) + .5rem)) max(16px, env(safe-area-inset-right)) 6rem max(16px, env(safe-area-inset-left)); display: grid; gap: 1rem; }
+:focus-visible { outline: 1px solid var(--sel); outline-offset: 1px; }
+.mono { font-family: var(--mono); letter-spacing: 0; }
+button {
+    appearance: none; font: 500 1rem var(--ui); letter-spacing: var(--uiLS); cursor: pointer;
+    color: var(--ink); background: var(--hl); border: 1px solid var(--edge); border-radius: 0;
+    padding: .45rem .9rem;
+}
+button:hover:not(:disabled) { border-color: var(--ink2); }
+button.primary { background: var(--sel); border-color: var(--sel); color: var(--bg); }
+.usb { margin-left: auto; display: flex; gap: .4rem; }
+.usb button { padding: .2rem .6rem; font-size: .833rem; }
+.usb button[aria-pressed="true"] { background: var(--sel); border-color: var(--sel); color: var(--bg); }
+.usb + .theme, .usb[hidden] + .theme { margin-left: 0; }
+.usb[hidden] + .theme { margin-left: auto; }
+.theme { margin-left: auto; display: flex; }
+.theme button { padding: .2rem .6rem; font-size: .833rem; border-left-width: 0; }
+.theme button:first-child { border-left-width: 1px; }
+.theme button[aria-pressed="true"] { background: var(--sel); border-color: var(--sel); color: var(--bg); }
+header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding-bottom: .75rem; border-bottom: 1px solid var(--rule); }
+h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: .14em; }
+h1 span { color: var(--dim); font-weight: 400; letter-spacing: var(--uiLS); margin-left: .4rem; }
+#device { flex: 1 1 16rem; margin: 0; color: var(--dim); font-size: .917rem; }
+.body { padding: .9rem .75rem; display: grid; gap: .7rem; justify-items: start; }
+.body p { margin: 0; color: var(--ink2); max-width: 70ch; }
+#notice { background: var(--panel); border: 1px solid var(--over); border-radius: 0; }
+#notice > h2 { margin: 0; padding: .4rem .75rem; font-size: .833rem; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; box-shadow: inset 0 -1px 0 var(--rule); }
+#notice > h2 { color: var(--over); }
+#notice.back { border-color: var(--rule); }
+#notice.back > h2 { color: var(--sel); }
+#notice.back button { display: none; }
+/* While the synth doesn't answer, what the controls show may be out of date. */
+body.down #instrument { opacity: .5; }
+footer {
+    position: fixed; inset: auto 0 0; z-index: 2; background: var(--panel); border-top: 1px solid var(--rule);
+    padding: .5rem max(16px, env(safe-area-inset-right)) calc(.5rem + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    display: grid; gap: .35rem;
+}
+footer > * { width: 100%; max-width: 128rem; margin: 0 auto; }
+.status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .3rem 1.5rem; font-family: var(--mono); }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 0; background: var(--over); margin-right: 6px; vertical-align: 1px; }
+.link-online .dot { background: var(--sel); }
+.link-wait .dot { background: var(--val); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+#load { color: var(--val); }
+#readout { color: var(--ink2); }
+#readout:empty { display: none; }
+.bar { position: relative; height: 2px; background: var(--ghost); }
+.bar i { position: absolute; top: 0; bottom: 0; left: 0; }
+#load-fill { width: 0; background: var(--sel); transition: width .3s; }
+#load-peak { width: 2px; margin-top: -2px; height: 6px; background: var(--ink2); transition: left .3s; }
+footer.hot #load-fill { background: var(--over); }
+footer.idle .bar i { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* In the app: the phone's own theme, and no USB buttons (the app connects by itself). */
+:root[data-app] .theme, :root[data-app] .usb { display: none !important; }
+
+/* Upright phone: one compact line at the top, a slim notice, room at the bottom for the pinned keys. */
+@media (max-width: 700px) and (min-height: 521px) {
+    :root { --status-height: calc(2.6rem + env(safe-area-inset-bottom)); }
+    main { gap: .6rem; padding-bottom: calc(24vh + var(--status-height) + 1rem); padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); }
+    header { flex-wrap: nowrap; align-items: center; gap: .6rem; padding-bottom: .5rem; }
+    h1 { font-size: 1.1rem; flex: none; }
+    #device { flex: 1 1 auto; min-width: 0; font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .theme button, .usb button { padding: .15rem .45rem; font-size: .75rem; }
+    #notice > h2 { padding: .3rem .6rem; }
+    #notice .body { padding: .5rem .6rem; gap: .4rem; grid-template-columns: 1fr auto; align-items: center; }
+    #notice .body p { font-size: .85rem; }
+    #notice-retry { padding: .3rem .7rem; }
+    footer { padding-top: .35rem; padding-bottom: calc(.35rem + env(safe-area-inset-bottom)); gap: .25rem; }
+}
+
+/* Sideways phone: the panel alone. The notice takes one slim row above it, and the panel shrinks to make room. */
+@media (orientation: landscape) and (max-height: 520px) {
+    :root { --notice-height: 2.75rem; }
+    body { overflow: hidden; }
+    header, footer { display: none; }
+    main { padding: max(4px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); gap: 0; min-height: 100dvh; align-content: center; }
+    #notice { box-sizing: border-box; height: var(--notice-height); margin-bottom: 4px; display: flex; align-items: center; overflow: hidden; }
+    #notice > h2 { flex: none; box-shadow: inset -1px 0 0 var(--rule); align-self: stretch; display: flex; align-items: center; }
+    #notice .body { flex: 1; min-width: 0; padding: 0 .3rem 0 .6rem; gap: .6rem; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+    #notice .body p { font-size: .75rem; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+    #notice-retry { padding: .3rem .7rem; }
+    main:has(> #notice:not([hidden])) #instrument {
+        max-width: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 12px - var(--notice-height)) * 570 / 291.2);
+    }
+}
+
+/* A phone held upright: the panel is laid out like the hardware, so it asks to be turned. */
+.turn { display: none; }
+@media (orientation: portrait) and (pointer: coarse) and (max-width: 700px) {
+    .turn {
+        display: grid; place-items: center; position: fixed; inset: 0; z-index: 20; margin: 0; padding: 2rem;
+        background: var(--bg); color: var(--ink); font-size: 1.4rem; text-align: center;
+    }
+}

@@ -1,0 +1,14 @@
+{
+    // One C/C++ language server for the Pico, the plugin and the checks: LLVM clangd, configured by /.clangd.
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": ["--query-driver=**/firmware/.deps/arm-gnu-toolchain-*/bin/arm-none-eabi-*,/opt/homebrew/bin/arm-none-eabi-*"],
+    "cmake.configureOnOpen": false,
+    "editor.formatOnSave": false,
+    "[cpp]": { "editor.formatOnSave": true, "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd" },
+    "[c]": { "editor.formatOnSave": true, "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd" },
+    "rust-analyzer.linkedProjects": ["app/Cargo.toml"],
+    "files.exclude": {
+        "**/build": true, "**/build-*": true, "app/target": true, "app/dist": true, "app/node_modules": true
+    },
+    "search.exclude": { "web/vendor": true, "app/gen": true }
+}

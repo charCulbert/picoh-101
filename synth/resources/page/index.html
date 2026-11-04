@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PICOH-101</title>
+<link rel="stylesheet" href="instrument.css">
+<style>
+html, body { margin: 0; overflow: hidden; }
+/* Laid out once at this size (the panel's 570 x 311 proportions); the whole panel then scales with
+   the window. */
+body { box-sizing: border-box; width: 1180px; height: 644px; overflow: hidden; transform-origin: 0 0; }
+#instrument { width: 1180px; max-width: none; min-width: 0; }
+.sh { border: 0; }
+</style>
+</head>
+<body>
+<div id="instrument"></div>
+<script>window.__picohPlugin = true;</script>
+<script type="module" src="dist/app.js"></script>
+</body>
+</html>

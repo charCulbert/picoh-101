@@ -1,0 +1,177 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}"
+  },
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  },
+  "tasks": [
+    {
+      "label": "Pico: Build + flash",
+      "detail": "Build the firmware, then load it onto the Pico over USB (no BOOTSEL needed once it runs this firmware).",
+      "type": "shell",
+      "command": "cmake -S firmware -B firmware/build && cmake --build firmware/build --target flash",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pico: Build",
+      "detail": "firmware/build/synth.uf2, with the synth from synth/ and the page from web/.",
+      "type": "shell",
+      "command": "cmake -S firmware -B firmware/build && cmake --build firmware/build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Pico: Serial log",
+      "detail": "The Pico's serial port: the page's lines and its log lines (# ...). Ctrl-A K to leave.",
+      "type": "shell",
+      "command": "screen $(ls /dev/cu.usbmodem* | head -1) 115200",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pico: Trace a slow block",
+      "detail": "Record until a block takes more than 80% of its time, then read it out: a Perfetto file in firmware/build/traces, and the slowest blocks. Play or move knobs meanwhile; close the page's USB serial first.",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        "firmware/tools/trace.py",
+        "over",
+        "80"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Pico: Trace 1000 blocks, playing notes",
+      "detail": "A test that repeats: notes through the serial port while it records 1000 blocks (1.3 s).",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        "firmware/tools/trace.py",
+        "blocks",
+        "1000",
+        "--play",
+        "--wait",
+        "30"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Pico: Build + flash with synth trace points",
+      "detail": "TRACE_DSP: stamps per voice and per pass inside the synth's render too (they cost a little: compare loads with the normal build).",
+      "type": "shell",
+      "command": "cmake -S firmware -B firmware/build -DTRACE_DSP=ON && cmake --build firmware/build --target flash",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Checks",
+      "detail": "The desktop checks: MIDI, events, the page's lines, WebSocket, parameter tables, the synth.",
+      "type": "process",
+      "command": "sh",
+      "args": [
+        "firmware/tools/check"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Parameters: Generate",
+      "detail": "params/parameters.json into the plugin's, the Pico's and the page's tables (every build does this too).",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        "params/generate.py"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Plugin: Build (CLAP)",
+      "detail": "synth/build/PICOH-101.clap",
+      "type": "shell",
+      "command": "cmake -S synth -B synth/build -G Ninja && cmake --build synth/build",
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Plugin: Install (CLAP)",
+      "detail": "Copy the CLAP to ~/Library/Audio/Plug-Ins/CLAP, for DAWs.",
+      "type": "shell",
+      "command": "mkdir -p ~/Library/Audio/Plug-Ins/CLAP && rm -rf ~/Library/Audio/Plug-Ins/CLAP/PICOH-101.clap && cp -R synth/build/PICOH-101.clap ~/Library/Audio/Plug-Ins/CLAP/",
+      "dependsOn": [
+        "Plugin: Build (CLAP)"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Plugin: Open in clap-host",
+      "detail": "Build the CLAP, then play it in clap-host: audio on, live MIDI, its page in a window. Type host commands in the terminal (help); closing the terminal quits.",
+      "type": "shell",
+      "command": "clap-host synth/build/PICOH-101.clap --script <(printf 'activate\\naudio.start\\nmidi.open\\ngui.open\\n')",
+      "dependsOn": [
+        "Plugin: Build (CLAP)"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Plugin: Build (WCLAP)",
+      "detail": "The plugin as a WCLAP, for browser DAWs: synth/build-wclap/PICOH-101.wclap.tar.gz.",
+      "type": "process",
+      "command": "sh",
+      "args": [
+        "tools/build-wclap"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "Browser: Serve",
+      "detail": "web/ on http://127.0.0.1:8460, for the page with the Pico on USB.",
+      "type": "shell",
+      "command": "cd web && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run build --silent && cd .. && python3 tools/serve.py 8460",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Run (macOS)",
+      "detail": "The app, with the Pico on USB. PICOH_LOG_LINES=1 prints every line.",
+      "type": "shell",
+      "command": "cd app && PATH=$HOME/.cargo/bin:$PATH cargo run",
+      "problemMatcher": []
+    },
+    {
+      "label": "App: Install on iPhone",
+      "detail": "Build for a connected, paired iPhone and install it (tauri.conf.json has the team).",
+      "type": "shell",
+      "command": "cd app && PATH=$HOME/.cargo/bin:$PATH npx tauri ios build --debug && xcrun devicectl device install app --device \"$(xcrun devicectl list devices | awk '/available \\(paired\\)/ && /iPhone/ {print $3; exit}')\" gen/apple/build/arm64/PICOH-101.ipa",
+      "problemMatcher": []
+    },
+    {
+      "label": "Page: Watch TypeScript",
+      "detail": "Recompiles web/src into web/dist on every save.",
+      "type": "shell",
+      "command": "cd web && npm run watch",
+      "isBackground": true,
+      "problemMatcher": [
+        "$tsc-watch"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reboots the board into its bootloader (opening its serial port at 1200 baud) and loads the firmware.
+# Usage: tools/flash picotool synth.uf2   (cmake --build <build dir> --target flash runs it)
+set -e
+picotool=$1 uf2=$2
+port=$(ls /dev/cu.usbmodem* 2>/dev/null | head -1)
+if [ -n "$port" ]; then
+    stty -f "$port" 1200 2>/dev/null || true
+    sleep 2
+fi
+"$picotool" load -x "$uf2"

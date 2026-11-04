@@ -1,0 +1,6 @@
+# Written by tools, or someone else's code: left as they come.
+**/*.generated.h
+app/gen/**
+firmware/third_party/**
+synth/elliptic-blep/**
+web/vendor/**

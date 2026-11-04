@@ -1,0 +1,10 @@
+#!/bin/sh
+# Builds the plugin (synth/) as a WCLAP, for browser DAWs: synth/build-wclap/PICOH-101.wclap.tar.gz.
+# usage: tools/build-wclap   (needs the WASI SDK 33, at $WASI_SDK_PATH or ~/WASI_SDK/wasi-sdk-33.0-*)
+set -e
+cd "$(dirname "$0")/.."
+SDK=${WASI_SDK_PATH:-$(ls -d "$HOME"/WASI_SDK/wasi-sdk-33.0-* 2>/dev/null | head -1)}
+[ -f "$SDK/share/cmake/wasi-sdk-p1.cmake" ] || { echo "WASI SDK 33 not found: set WASI_SDK_PATH" >&2; exit 1; }
+cmake -S synth -B synth/build-wclap -G Ninja -DCMAKE_TOOLCHAIN_FILE="$SDK/share/cmake/wasi-sdk-p1.cmake" >/dev/null
+cmake --build synth/build-wclap
+ls -l synth/build-wclap/PICOH-101.wclap.tar.gz

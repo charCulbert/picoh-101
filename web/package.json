@@ -1,0 +1,15 @@
+{
+  "name": "picoh-101-gui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean --silent && tsc -p . --noEmit && esbuild src/app.ts --bundle --splitting --format=esm --target=es2022 --minify --outdir=dist --chunk-names=[name] --external:../lib/messages.js --log-level=warning",
+    "watch": "esbuild src/app.ts --bundle --splitting --format=esm --target=es2022 --outdir=dist --chunk-names=[name] --external:../lib/messages.js --watch",
+    "check": "tsc -p . --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "esbuild": "0.28.2"
+  }
+}

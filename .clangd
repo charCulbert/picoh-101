@@ -1,0 +1,16 @@
+# Each part's compile database is written by its build:
+#   firmware/build (cmake -B build in firmware/), firmware/build-tests (firmware/tools/check), synth/build (the CLAP).
+If:
+  PathMatch: firmware/tests/.*
+CompileFlags:
+  CompilationDatabase: firmware/build-tests
+---
+If:
+  PathMatch: firmware/.*
+CompileFlags:
+  CompilationDatabase: firmware/build
+---
+If:
+  PathMatch: (synth|params)/.*
+CompileFlags:
+  CompilationDatabase: synth/build

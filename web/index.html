@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PICOH-101</title>
+<link rel="stylesheet" href="instrument.css">
+<link rel="stylesheet" href="page.css">
+<p class="turn">Turn your phone sideways</p>
+<main>
+<header>
+<h1>PICOH-101</h1>
+<p id="device" class="mono">connecting…</p>
+<div class="usb" role="group" aria-label="Connect over USB" hidden>
+<button id="usb-serial" type="button" title="The Pico on this computer's USB, through its serial port (Chrome, Edge)">USB serial</button>
+<button id="usb-midi" type="button" title="The Pico on this computer's USB, through its MIDI port (Chrome)">USB MIDI</button>
+<button id="usb-off" type="button" hidden>Disconnect USB</button>
+</div>
+<div class="theme" role="group" aria-label="Theme">
+<button type="button" data-theme-choice="system">System</button>
+<button type="button" data-theme-choice="dark">Dark</button>
+<button type="button" data-theme-choice="light">Light</button>
+</div>
+</header>
+<section id="notice" class="notice" hidden aria-live="polite">
+<h2 id="notice-title">Can’t reach the synth</h2>
+<div class="body">
+<p id="notice-detail"></p>
+<button id="notice-retry" class="primary" type="button">Try now</button>
+</div>
+</section>
+<div id="instrument"></div>
+</main>
+<footer>
+<div class="status">
+<span id="link" class="link-wait"><i class="dot"></i><span id="link-text">connecting</span></span>
+<span id="readout" class="mono" aria-live="polite"></span>
+<span id="load" class="mono">audio –</span>
+</div>
+<div class="bar" title="Share of each 1.33 ms audio block the synth uses: average, and the busiest block as a tick"><i id="load-fill"></i><i id="load-peak"></i></div>
+</footer>
+<script type="module" src="dist/app.js"></script>

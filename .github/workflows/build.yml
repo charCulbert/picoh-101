@@ -1,0 +1,178 @@
+name: Build
+
+# Builds the CLAP on macOS, Windows and Linux and validates it, the WCLAP, and the firmware for the
+# Pico 2 W and the Pico 2, and runs the desktop checks. A tag v* also makes a draft release with all of them.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NAME: PICOH-101
+
+jobs:
+  plugin:
+    name: CLAP (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libx11-dev libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      - name: Build
+        run: |
+          cmake -S synth -B build
+          cmake --build build --config Release --parallel 4 --target "${NAME}_clap"
+
+      - name: Check the licenses ship
+        run: |
+          dir=$(find build \( -path "*/$NAME.clap/Contents/Resources" -o -name "$NAME.clap.resources" \) -type d -print -quit)
+          test -f "$dir/LICENSE" && test -f "$dir/THIRD_PARTY_NOTICES.md"
+          ls "$dir/THIRD_PARTY_LICENSES/"*.txt
+
+      - name: Check out clap-validator
+        uses: actions/checkout@v4
+        with:
+          repository: free-audio/clap-validator
+          ref: 0.4.1
+          path: validator
+
+      - name: Validate
+        run: |
+          plugin=$(find build -name "$NAME.clap" -print -quit)
+          test -n "$plugin"
+          cargo run --release --locked --manifest-path validator/Cargo.toml -- validate "$plugin" --only-failed
+
+      - name: Package
+        run: |
+          mkdir -p "out/$NAME"
+          plugin=$(find build -name "$NAME.clap" -print -quit)
+          cp -R "$plugin" "out/$NAME/"
+          [ ! -d "$plugin.resources" ] || cp -R "$plugin.resources" "out/$NAME/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clap-${{ runner.os }}
+          path: out/
+          if-no-files-found: error
+
+  wclap:
+    name: WCLAP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install the WASI SDK
+        run: |
+          curl -sSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz | tar xz
+          echo "WASI_SDK_PATH=$PWD/wasi-sdk-33.0-x86_64-linux" >> "$GITHUB_ENV"
+          sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build
+        run: tools/build-wclap
+
+      - name: Check the archive
+        run: |
+          tar tzf "synth/build-wclap/$NAME.wclap.tar.gz" > contents.txt
+          for f in module.wasm LICENSE THIRD_PARTY_NOTICES.md page/index.html; do grep -qx "$f" contents.txt; done
+          grep -q '^THIRD_PARTY_LICENSES/.*\.txt$' contents.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wclap
+          path: synth/build-wclap/${{ env.NAME }}.wclap.tar.gz
+          if-no-files-found: error
+
+  firmware:
+    name: Firmware (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [pico2_w, pico2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # The SDK, the Arm toolchain and picotool, fetched by the first configure.
+      - uses: actions/cache@v4
+        with:
+          path: firmware/.deps
+          key: firmware-deps-${{ hashFiles('firmware/cmake/deps.cmake') }}
+
+      - name: Build
+        run: |
+          cmake -S firmware -B firmware/build -DPICO_BOARD=${{ matrix.board }}
+          cmake --build firmware/build --target synth --parallel 4
+          mkdir out && cp firmware/build/synth.uf2 "out/$NAME-${{ matrix.board }}.uf2"
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.board == 'pico2'
+        with:
+          name: notices
+          path: |
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uf2-${{ matrix.board }}
+          path: out/
+          if-no-files-found: error
+
+  checks:
+    name: Desktop checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: firmware/tools/check
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [plugin, wclap, firmware, checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip the CLAPs
+        run: |
+          for os in macOS Windows Linux; do (cd "artifacts/clap-$os" && zip -qr "../../$NAME-CLAP-$os.zip" "$NAME"); done
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --generate-notes \
+            "$NAME"-CLAP-*.zip artifacts/uf2-*/*.uf2 "artifacts/wclap/$NAME.wclap.tar.gz" \
+            artifacts/notices/LICENSE artifacts/notices/THIRD_PARTY_NOTICES.md
