@@ -5,6 +5,10 @@
 
 namespace picohDSP
 {
+namespace fixed
+{
+struct Envelope;
+}
 
 // An analog-style ADSR, 0 to 1: each stage charges toward a point just past its target (by overshoot) and
 // stops there. A full stage takes its set time; one that starts part way arrives sooner, as in hardware.
@@ -29,6 +33,7 @@ struct Envelope
 
     private:
         friend struct Envelope;
+        friend struct fixed::Envelope;
 
         float sampleRate = 0.0f;
         float attackSeconds = 0.005f, decaySeconds = 0.1f, sustainLevel = 1.0f, releaseSeconds = 0.2f;

@@ -50,7 +50,8 @@ struct Synth
     float getVolume() const noexcept { return volume; }
 
     // The same in both channels.
-    void render (float* left, float* right, int frames) noexcept;
+    using Sample = picohDSP::Voice::Sample; // float, or Q27 in the fixed-point build
+    void render (Sample* left, Sample* right, int frames) noexcept;
 
     // Each note that has finished sounding, during noteOn, stopAll or render.
     std::function<void (const picohDSP::Note&)> onNoteEnded;
@@ -83,11 +84,11 @@ private:
 
     picohDSP::MonoKeys keys;
     picohDSP::Voice voice;
-    std::vector<float> mono;
+    std::vector<Sample> mono;
     picohDSP::Voice::Settings voiceSettings;
     picohDSP::Envelope::Settings envelopeSettings;
     picohDSP::CoefficientTable filterTable;
-    picohDSP::EllipticBlep::Table correctionTable;
+    picohDSP::Voice::CorrectionTable correctionTable;
 
     picohDSP::Arpeggio arpeggio;
     picohDSP::Sequencer sequencer;

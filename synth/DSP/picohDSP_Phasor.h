@@ -39,9 +39,9 @@ struct Phasor
     // Moves on this many samples at once, in double, at the frequency last set; returns the cycles passed.
     long long skip (int frames) noexcept;
 
-private:
-    static constexpr float maxIncrement = 0.49f;
+    static constexpr float maxIncrement = 0.49f; // cycles per sample
 
+private:
     float inverseSampleRate = 0.0f;
     float phase = 0.0f;     // 0 to 1
     float increment = 0.0f; // cycles per sample, this sample's

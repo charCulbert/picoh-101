@@ -61,10 +61,25 @@ struct Filter
 
     float process (float input) noexcept;
 
-private:
     // The soft clip's limit, set by ear, and the gain that brings a clipped saw back to its level.
     static constexpr float clipLevel = 1.42f, clipMakeUp = 1.1f;
+    // Singing, the clips and the one-pass loop pull the pitch flat, more as it rises: up to 0.2 semitone at
+    // 3.3 kHz. This many semitones per unit of g puts it back.
+    static constexpr float pitchCorrection = 0.93f;
+
+    // What setResonance() and hold() work out, for any filter with this one's loop.
+    struct Resonance
+    {
+        float loopGain; // k: how much of the output is fed back, 0 to past 4
+        float singing;  // 0 up to RES 0.8, 1 at full: how much of the pitch correction applies
+    };
+    static Resonance resonanceFor (float amount) noexcept;
+    // A stage's g / (1 + g) for a cutoff note, kept to the table's range, with the pitch correction.
+    static float stageGain (const CoefficientTable& table, float note, float singing) noexcept;
+
+private:
     static float clip (float x) noexcept; // tanh-like, to +-clipLevel
+    void updateCoefficients() noexcept;    // from G and k
 
     float sampleRate = 0.0f;
     const CoefficientTable* table = nullptr;
@@ -74,10 +89,9 @@ private:
     float loopGain = 0.0f;   // k: how much of the output is fed back, 0 to past 4
     float outputGain = 1.0f; // 1 + k, so the bass holds its level
     float G = 0.0f;          // a stage's g / (1 + g), held with the cutoff
-    float singing = 0.0f;    // 0 up to RES 0.8, 1 at full: how much of the pitch correction applies
-    // Singing, the clips and the one-pass loop pull the pitch flat, more as it rises: up to 0.2 semitone at
-    // 3.3 kHz. This many semitones per unit of g puts it back.
-    static constexpr float pitchCorrection = 0.93f;
+    // The loop's estimate from the input and the four states: {G^4, bG^3, bG^2, bG, b} / (1 + kG^4), b = 1 - G.
+    float c4 = 0.0f, c3 = 0.0f, c2 = 0.0f, c1 = 0.0f, c0 = 1.0f;
+    float singing = 0.0f;
     float stages[4] = {};
 };
 
@@ -167,34 +181,59 @@ inline void Filter::setCutoffNote (float note) noexcept
 
 // A ladder's peak above the passband is (1 + k) / (4 - k) at the cutoff. Up to 0.8 that peak is q = 0.5 to
 // 4.5; over the last fifth k goes on to 4.4, past 4, where the loop sings and the soft clips hold it.
-inline void Filter::setResonance (float amount) noexcept
+inline Filter::Resonance Filter::resonanceFor (float amount) noexcept
 {
     const auto kForQ = [] (float q) { return (4.0f * q - 1.0f) / (1.0f + q); };
     const float r = std::clamp (amount, 0.0f, 1.0f);
     constexpr float knee = 0.8f, top = 4.4f;
     const float atKnee = kForQ (0.5f + 5.0f * knee);
-    singing = r <= knee ? 0.0f : (r - knee) / (1.0f - knee);
-    loopGain = atKnee + (top - atKnee) * singing;
+    const float singing = r <= knee ? 0.0f : (r - knee) / (1.0f - knee);
     if (r <= knee)
-        loopGain = kForQ (0.5f + 5.0f * r);
+        return { kForQ (0.5f + 5.0f * r), singing };
+    return { atKnee + (top - atKnee) * singing, singing };
+}
+
+inline void Filter::setResonance (float amount) noexcept
+{
+    const Resonance resonance = resonanceFor (amount);
+    loopGain = resonance.loopGain;
+    singing = resonance.singing;
     outputGain = (1.0f + loopGain) * clipMakeUp;
+    updateCoefficients();
+}
+
+inline float Filter::stageGain (const CoefficientTable& table, float note, float singing) noexcept
+{
+    note = std::clamp (note, table.getLowestNote(), table.getHighestNote());
+    auto [g, p] = table.lookup (note);
+    if (singing > 0.0f)
+    {
+        const auto corrected = table.lookup (std::min (note + singing * pitchCorrection * g, table.getHighestNote()));
+        g = corrected.g;
+        p = corrected.p;
+    }
+    return g * p;
 }
 
 inline void Filter::hold (float modulationSemitones, int samples) noexcept
 {
     assert (table != nullptr && samples > 0);
     cutoffNote.skip (samples / 2);
-    const float note =
-        std::clamp (cutoffNote.getCurrent() + modulationSemitones, table->getLowestNote(), table->getHighestNote());
+    const float note = cutoffNote.getCurrent() + modulationSemitones;
     cutoffNote.skip (samples - samples / 2);
-    auto [g, p] = table->lookup (note);
-    if (singing > 0.0f)
-    {
-        const auto corrected = table->lookup (std::min (note + singing * pitchCorrection * g, table->getHighestNote()));
-        g = corrected.g;
-        p = corrected.p;
-    }
-    G = g * p;
+    G = stageGain (*table, note, singing);
+    updateCoefficients();
+}
+
+inline void Filter::updateCoefficients() noexcept
+{
+    const float b = 1.0f - G, G2 = G * G, G4 = G2 * G2, inverse = 1.0f / (1.0f + loopGain * G4);
+    const float bInverse = b * inverse;
+    c4 = G4 * inverse;
+    c3 = bInverse * G2 * G;
+    c2 = bInverse * G2;
+    c1 = bInverse * G;
+    c0 = bInverse;
 }
 
 inline float Filter::clip (float x) noexcept
@@ -207,9 +246,7 @@ inline float Filter::clip (float x) noexcept
 // stages were linear, and that estimate feeds the clipped stages.
 inline float Filter::process (float x) noexcept
 {
-    const float b = 1.0f - G, G2 = G * G, G4 = G2 * G2;
-    const float fromStates = b * (G2 * G * stages[0] + G2 * stages[1] + G * stages[2] + stages[3]);
-    const float estimate = (G4 * x + fromStates) / (1.0f + loopGain * G4);
+    const float estimate = c4 * x + c3 * stages[0] + c2 * stages[1] + c1 * stages[2] + c0 * stages[3];
     float u = clip (x - loopGain * estimate);
     for (float& state : stages)
     {

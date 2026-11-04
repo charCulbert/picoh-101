@@ -1,0 +1,13 @@
+# The fixed-point synth against the float one, on this computer: tools/check-fixed.
+cmake_minimum_required(VERSION 3.16)
+project(picoh101_fixed_check CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(SYNTH ${CMAKE_CURRENT_LIST_DIR}/../../../synth)
+foreach (kind float fixed)
+    add_executable(render_${kind} render.cpp ${SYNTH}/Synth.cpp ${SYNTH}/SynthParameters.cpp)
+    target_include_directories(render_${kind} PRIVATE ${SYNTH} ${SYNTH}/elliptic-blep)
+    target_compile_options(render_${kind} PRIVATE -O2 -Wall)
+endforeach()
+target_compile_definitions(render_fixed PRIVATE PICOH_FIXED_POINT=1)
+add_executable(compare compare.cpp)
+target_compile_options(compare PRIVATE -O2)

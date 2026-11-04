@@ -8,6 +8,9 @@
 #include "picohDSP_LFO.h"
 #include "picohDSP_TraceHook.h"
 #include "picohDSP_Vco.h"
+#if PICOH_FIXED_POINT
+#include "picohDSP_FixedVoice.h"
+#endif
 
 namespace picohDSP
 {
@@ -22,6 +25,23 @@ namespace picohDSP
 // works them out at once.
 struct Voice
 {
+#if PICOH_FIXED_POINT // the RP2040, no FPU: the per-sample parts in fixed point, sound Q27, levels Q30
+    using Sample = int32_t;
+    using Vco = fixed::Vco;
+    using Filter = fixed::Filter;
+    using Envelope = fixed::Envelope;
+    using Gate = fixed::Gate;
+    using CorrectionTable = fixed::Blep::Table;
+    static constexpr float envelopeUnit = 1 << 30;
+    static int32_t toLevel (float x) noexcept { return fixed::toQ30 (x); }
+    static int32_t scale (int32_t x, float gain) noexcept { return fixed::mul (x, fixed::toQ30 (gain), 30); }
+#else
+    using Sample = float;
+    using CorrectionTable = EllipticBlep::Table;
+    static constexpr float envelopeUnit = 1.0f; // the ADSR at 1
+    static float toLevel (float x) noexcept { return x; }
+    static float scale (float x, float gain) noexcept { return x * gain; }
+#endif
     static constexpr float keyTrackPivot = 35.0f;      // the note key tracking leaves alone (B1)
     static constexpr float envelopeSemitones = 192.0f; // Env Amount 1 moves the cutoff this far
     static constexpr int tickLength = 16;
@@ -56,7 +76,7 @@ struct Voice
     void release() noexcept;
     void stop() noexcept;
     bool isActive() const noexcept;
-    void render (float* __restrict out, int frames) noexcept; // adds into out
+    void render (Sample* __restrict out, int frames) noexcept; // adds into out
     void skip (int frames) noexcept;
 
     // Before start().
@@ -81,10 +101,10 @@ private:
     int sinceTick = 0;
     bool late = true; // the controls are due before the next tick: after prepare() or skip()
     float cutoffSemitones = 0.0f, halfSweepScale = 0.0f; // the cutoff with the ADSR at 0, and per ADSR unit, halved
-    float lfoWidth = 0.0f;                                 // the PWM on LFO
+    Sample lfoWidth {};                                    // the PWM on LFO
 
     void control (int frames) noexcept;               // the controls, for the next frames samples
-    void renderRun (float* __restrict out, int frames) noexcept; // within a tick
+    void renderRun (Sample* __restrict out, int frames) noexcept; // within a tick
     void advanceClock (int frames) noexcept;
 };
 
@@ -144,7 +164,7 @@ inline bool Voice::isActive() const noexcept
     return settings->vcaGate ? gate.isActive() : envelope.isActive();
 }
 
-inline void Voice::render (float* __restrict out, int frames) noexcept
+inline void Voice::render (Sample* __restrict out, int frames) noexcept
 {
     for (int done = 0; done < frames;)
     {
@@ -193,8 +213,8 @@ inline void Voice::control (int frames) noexcept
     vco.startBlock (frames);
     cutoffSemitones = (key - keyTrackPivot) * s.keyTrack + lfoValue * s.lfoToCutoffSemitones
                     + triangle * s.wheelToCutoffSemitones + s.bendCutoffSemitones;
-    halfSweepScale = s.envAmount * envelopeSemitones * 0.5f;
-    lfoWidth = 0.5f * (lfoValue + 1.0f);
+    halfSweepScale = s.envAmount * envelopeSemitones * (0.5f / envelopeUnit);
+    lfoWidth = toLevel (0.5f * (lfoValue + 1.0f));
 
     Envelope ahead = envelope;
     const int below = (frames - 1) / 2, above = frames / 2;
@@ -212,6 +232,9 @@ inline void Voice::control (int frames) noexcept
     PICOH_TRACE_POINT (voiceStarted, frames);
 }
 
+#if PICOH_FIXED_POINT
+#include "picohDSP_FixedVoiceRender.h"
+#else
 // The ADSR and the gate first (ENV can move the pulse's width), then the VCO, then the filter and VCA. In one
 // loop they don't fit the registers. The ADSR and the gate both run, so switching the VCA mid-note doesn't
 // jump.
@@ -240,5 +263,6 @@ inline void Voice::renderRun (float* __restrict out, int frames) noexcept
         out[i] += filter.process (sound[i]) * level[i];
     PICOH_TRACE_POINT (filterDone, frames);
 }
+#endif
 
 } // namespace picohDSP

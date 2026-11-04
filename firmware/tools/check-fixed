@@ -1,0 +1,11 @@
+#!/bin/sh
+# The fixed-point synth (the RP2040's) against the float one: the same scenarios rendered by both, then
+# a null test and third-octave spectra (tests/fixed). Usage: firmware/tools/check-fixed
+set -e
+cd "$(dirname "$0")/.."
+cmake -S tests/fixed -B build-tests-fixed -G Ninja >/dev/null
+cmake --build build-tests-fixed
+mkdir -p build-tests-fixed/float build-tests-fixed/fixed
+build-tests-fixed/render_float build-tests-fixed/float
+build-tests-fixed/render_fixed build-tests-fixed/fixed
+build-tests-fixed/compare build-tests-fixed/float build-tests-fixed/fixed "$@" # a folder here gets WAV pairs

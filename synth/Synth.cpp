@@ -3,7 +3,7 @@
 
 void Synth::prepare (double sampleRate, int maxFrames)
 {
-    mono.assign (static_cast<size_t> (std::max (1, maxFrames)), 0.0f);
+    mono.assign (static_cast<size_t> (std::max (1, maxFrames)), Sample {});
     keys.prepare (sampleRate);
     voice.prepare (sampleRate, 0);
     filterTable.build (sampleRate);
@@ -122,7 +122,7 @@ void Synth::setModWheel (float value) noexcept
     updateBender();
 }
 
-void Synth::render (float* left, float* right, int frames) noexcept
+void Synth::render (Sample* left, Sample* right, int frames) noexcept
 {
     PICOH_TRACE_POINT (synthBegin, frames);
 
@@ -137,7 +137,7 @@ void Synth::render (float* left, float* right, int frames) noexcept
         if (lfoGates || clocked)
             count = std::min (count, voice.getLfo().samplesToEdge());
 
-        std::fill (mono.begin(), mono.begin() + count, 0.0f);
+        std::fill (mono.begin(), mono.begin() + count, Sample {});
         PICOH_TRACE_POINT (monoCleared, count);
         PICOH_TRACE_POINT (voiceBegin, 0);
         if (voice.isActive())
@@ -162,7 +162,7 @@ void Synth::render (float* left, float* right, int frames) noexcept
             followLfo (lfoGates);
 
         for (int i = 0; i < count; ++i)
-            left[done + i] = right[done + i] = mono[static_cast<size_t> (i)] * outputLevel;
+            left[done + i] = right[done + i] = picohDSP::Voice::scale (mono[static_cast<size_t> (i)], outputLevel);
         PICOH_TRACE_POINT (outputCopied, count);
 
         done += count;

@@ -7,6 +7,7 @@
 #include "picohDSP_Discontinuities.h"
 #include "picohDSP_Drift.h"
 #include "picohDSP_EllipticBlep.h"
+#include "picohDSP_Exp2.h"
 #include "picohDSP_Phasor.h"
 #include "picohDSP_SmoothedValue.h"
 
@@ -33,7 +34,9 @@ struct Vco
         twoOctavesDownPulse // pulse, -2 oct, 25%: high for 1 cycle in 4
     };
 
-    static constexpr float levelGlideSeconds = 0.02f;
+    static constexpr float levelGlideSeconds = 0.02f, widthGlideSeconds = 0.005f;
+    // Each VCO starts its phase this far (in cycles) times its index from the last, so none line up.
+    static constexpr float phaseSpread = 0.618034f;
     // How far the pitch wanders (see Drift), 0 to 1: about 0.04 cents either way.
     static constexpr float driftAmount = 0.1f;
     // The pulse's width, from square (0) to its narrowest (1).
@@ -106,7 +109,7 @@ inline void Vco::prepare (double newSampleRate, size_t index) noexcept
     sampleRate = static_cast<float> (newSampleRate);
     phasor.prepare (newSampleRate);
     correction.prepare (newSampleRate);
-    const float start = static_cast<float> (index) * 0.618034f;
+    const float start = static_cast<float> (index) * phaseSpread;
     phasor.setPhase (start - std::floor (start));
     drift.prepare (newSampleRate, static_cast<uint32_t> (index));
     drift.setAmount (driftAmount);
@@ -163,7 +166,7 @@ inline void Vco::setSubWave (SubWave wave) noexcept
 // 5 ms, so moving the slider doesn't click.
 inline void Vco::setPulseWidth (float amount) noexcept
 {
-    width.setTarget (std::clamp (amount, 0.0f, 1.0f), static_cast<int> (0.005f * sampleRate));
+    width.setTarget (std::clamp (amount, 0.0f, 1.0f), static_cast<int> (widthGlideSeconds * sampleRate));
 }
 
 // Retuned every tick, moving or not, so the cost doesn't depend on modulation.
@@ -245,7 +248,7 @@ inline void Vco::skip (int frames) noexcept
 inline float Vco::frequency() const noexcept
 {
     const float semitones = key - 69.0f + (tuneCents + modulationCents + drift.getCents()) / 100.0f;
-    return 440.0f * std::exp2 (semitones / 12.0f);
+    return 440.0f * exp2 (semitones / 12.0f);
 }
 
 // subCount counts the cycles 0-3: -1 oct flips every cycle, -2 oct every 2, the pulse is high for 1 in 4.
