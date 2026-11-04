@@ -1,11 +1,42 @@
 #!/bin/sh
 # Reboots the board into its bootloader (opening its serial port at 1200 baud) and loads the firmware.
 # Usage: tools/flash picotool synth.uf2   (cmake --build <build dir> --target flash runs it)
+# A board already in its bootloader is loaded as it is. Otherwise, with more than one board on USB, it asks
+# which; PORT=/dev/cu.usbmodemXXX picks one without asking.
 set -e
 picotool=$1 uf2=$2
-port=$(ls /dev/cu.usbmodem* 2>/dev/null | head -1)
-if [ -n "$port" ]; then
+inBootloader() { "$picotool" info -d >/dev/null 2>&1; }
+
+if ! inBootloader; then
+    ports=$(ls /dev/cu.usbmodem* 2>/dev/null || true)
+    if [ -z "$PORT" ] && [ "$(echo "$ports" | grep -c .)" -gt 1 ]; then
+        i=0
+        for p in $ports; do
+            i=$((i + 1))
+            serial=$(ioreg -r -c IOUSBHostDevice -l -w0 | grep -E '"USB Serial Number"|"IOCalloutDevice"' \
+                     | grep -B1 "\"$p\"" | sed -n 's/.*"USB Serial Number" = "\(.*\)"/\1/p')
+            echo "  $i) $p ${serial:+(serial $serial)}"
+        done
+        printf "More than one board on USB. Flash which? "
+        read -r n || true
+        case "$n" in '' | *[!0-9]*) PORT= ;; *) PORT=$(echo "$ports" | sed -n "${n}p") ;; esac
+        [ -n "$PORT" ] || { echo "No board ${n:-chosen}: not flashing."; exit 1; }
+    fi
+    port=${PORT:-$ports}
+    [ -n "$port" ] || { echo "No board on USB."; exit 1; }
     stty -f "$port" 1200 2>/dev/null || true
-    sleep 2
+    for i in $(seq 1 20); do inBootloader && break; sleep 0.5; done
+    inBootloader || { echo "$port didn't come up in its bootloader."; exit 1; }
 fi
+
+# The chip must be the one the UF2 is for (the family id in its last block: an RP2350 UF2 starts with a
+# block for any chip).
+family=$(od -An -tx4 -j$(($(wc -c < "$uf2") - 512 + 28)) -N4 "$uf2" | tr -d ' ')
+chip=$("$picotool" info -d 2>/dev/null | sed -n 's/^ *type: *//p' | head -1)
+case "$family:$chip" in
+    e48bff56:RP2040 | e48bff59:RP2350) ;;
+    *) echo "The board in its bootloader is ${chip:-unknown}, not the chip this UF2 is for: not flashing."
+       "$picotool" reboot >/dev/null 2>&1 || true
+       exit 1 ;;
+esac
 "$picotool" load -x "$uf2"
