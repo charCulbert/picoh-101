@@ -139,8 +139,8 @@ function status() {
     else if (performance.now() < backUntil) setLink(`back after ${backAfter} s`, "online");
     else setLink("online", "online");
     const via = link.transport;
-    $("device").textContent = via ? `Pico over ${via} · ${down ? "not answering" : "48 kHz · 1.33 ms blocks"}`
-        : `${picoHost || location.host || "picoh-101"} · ${down ? "not answering" : "48 kHz · 1.33 ms blocks"}`;
+    $("device").textContent = via ? `Pico over ${via} · ${down ? "not answering" : "48 kHz"}`
+        : `${picoHost || location.host || "picoh-101"} · ${down ? "not answering" : "48 kHz"}`;
     document.body.classList.toggle("down", down && ever);
     document.querySelector("footer")!.classList.toggle("idle", down);
 

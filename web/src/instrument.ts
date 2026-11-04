@@ -55,11 +55,10 @@ interface Lever {
 function benderLever(onMove: (bend: number, mod: number) => void): Lever {
     const el = document.createElement("div");
     el.className = "lever";
-    el.innerHTML = `<div class="lever-track" role="slider" aria-label="Bender"><span class="lever-slot"></span><svg class="lever-stem" aria-hidden="true"><line x1="50%" y1="115%" /></svg><span class="lever-thumb"></span></div>
+    el.innerHTML = `<div class="lever-track" role="slider" aria-label="Bender"><span class="lever-slot"></span><span class="lever-thumb"></span></div>
 <span class="lever-arrow" aria-hidden="true"></span><span class="under-label">BENDER</span>`;
     const track = el.querySelector<HTMLElement>(".lever-track")!;
     const thumb = el.querySelector<HTMLElement>(".lever-thumb")!;
-    const stem = el.querySelector("line")!;
     let bend = 0, mod = 0, held = false;
     // A drag moves it from where it is, along whichever axis moved first; Shift frees both.
     let startX = 0, startY = 0, startBend = 0, startMod = 0, axis: "" | "x" | "y" = "";
@@ -68,8 +67,6 @@ function benderLever(onMove: (bend: number, mod: number) => void): Lever {
         const x = `${50 + bend * 40}%`, y = `${72 - mod * 44}%`;
         thumb.style.left = x;
         thumb.style.top = y;
-        stem.setAttribute("x2", x);
-        stem.setAttribute("y2", y);
     };
     const move = (e: PointerEvent) => {
         const r = track.getBoundingClientRect();
@@ -369,12 +366,27 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
     controls.set(arpParam.id, { p: arpParam, box: q(".arp"), set: (v) => { for (const a of arp) a.el.pressed = a.value === v; } });
 
     const holdParam = byKey.get("hold")!;
-    let holdOn = false, legatoDown = false, restDown = false;
+    // While loading, HOLD is LEGATO: held, the keys pressed meanwhile are tied; pressed and let go
+    // alone, it stays down for the next key only (a mouse can't hold it and press a key). Again: cancel.
+    let holdOn = false, legatoDown = false, legatoArmed = false, keyWhileLegato = false, restDown = false;
+    const endLegato = () => {
+        legatoArmed = false;
+        live.legato(false);
+        hold.light(holdOn);
+    };
     const hold = holdButton("HOLD", "LEGATO", (down) => {
-        if (down && seqMode === "loading") legatoDown = true;
-        if (legatoDown) {
-            live.legato(down);
-            if (!down) legatoDown = false;
+        if (down && legatoArmed) return endLegato();
+        if (down && seqMode === "loading") {
+            legatoDown = true;
+            keyWhileLegato = false;
+            live.legato(true);
+            hold.light(true);
+            return;
+        }
+        if (!down && legatoDown) {
+            legatoDown = false;
+            if (keyWhileLegato) endLegato();
+            else legatoArmed = true;
             return;
         }
         if (!down) return;
@@ -409,7 +421,11 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
     // before it can, the synth lets go itself.
     const piano = q<CompostPiano>(".keys");
     const note = (e: Event) => (e as CustomEvent<{ note: number }>).detail.note;
-    piano.addEventListener("note-down", (e) => live.noteOn(note(e)));
+    piano.addEventListener("note-down", (e) => {
+        live.noteOn(note(e));
+        keyWhileLegato = true;
+        if (legatoArmed) endLegato();
+    });
     piano.addEventListener("note-up", (e) => live.noteOff(note(e)));
     const letGo = () => { piano.allNotesOff(); live.releaseNotes(); };
     document.addEventListener("visibilitychange", () => { if (document.hidden) letGo(); });
@@ -443,6 +459,7 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
         sequencer(mode, position, length) {
             const was = seqMode;
             seqMode = mode;
+            if (mode !== "loading" && legatoArmed) endLegato();
             load.light(mode === "loading");
             play.light(mode === "playing");
             if (mode === "loading") live.say(`LOAD  ${position} step${position === 1 ? "" : "s"}`);
