@@ -1,0 +1,20 @@
+#!/bin/sh
+# One UF2 for the Pico and the Pico 2: both programs linked into one block loop (the RP2040's first, at
+# the start of flash; the RP2350's bootrom finds its own further up and maps it to the start), written
+# out twice, for the RP2040's family and for any RP2350, so each chip's bootrom takes its half.
+# Usage: tools/universal-uf2 picotool out.uf2 rp2040/synth.bin rp2350/synth.bin
+#        (cmake --build <Pico 2 build> --target universal runs it)
+set -e
+picotool=$1 out=$2 rp2040=$3 rp2350=$4
+version=$("$picotool" version | sed -n 's/^picotool v\([0-9]*\)\.\([0-9]*\).*/\1 \2/p')
+set -- $version
+[ "${1:-0}" -gt 2 ] || { [ "${1:-0}" -eq 2 ] && [ "${2:-0}" -ge 2 ]; } \
+    || { echo "picotool 2.2.0 or later needed (link takes two programs); this is $("$picotool" version)"; exit 1; }
+[ -f "$rp2040" ] || { echo "No RP2040 build: $rp2040 (cmake -B build-pico -DPICO_BOARD=pico && cmake --build build-pico)"; exit 1; }
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+"$picotool" link "$tmp/both.bin" "$rp2040" "$rp2350" -p 0x1000 >/dev/null
+"$picotool" uf2 convert "$tmp/both.bin" "$tmp/rp2040.uf2" --family rp2040 --offset 0x10000000 >/dev/null
+"$picotool" uf2 convert "$tmp/both.bin" "$tmp/rp2350.uf2" --family absolute --offset 0x10000000 >/dev/null
+cat "$tmp/rp2040.uf2" "$tmp/rp2350.uf2" > "$out"
+echo "$out: the Pico and the Pico 2"

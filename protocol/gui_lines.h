@@ -16,6 +16,10 @@
 //   p <load|store>          (Pico) the patch buttons: arms one, or disarms it if armed. The next key from
 //                           41 to 72 (F to C), from any input, loads or stores that key's patch
 //   ping                    (USB MIDI) still here; no answer. A SysEx GUI silent for 5 s is gone.
+//   page                    (Pico, USB MIDI) answered with page <hash> <size>: the page's files, for a GUI
+//                           that carries none (the app). Over Wi-Fi it's GET /page, with If-None-Match.
+//   page <offset>           (Pico, USB MIDI) the page from offset to its end, in pageChunk messages. Any other
+//                           line stops it.
 //
 // Synth to GUI:
 //   v <id> <value>          a parameter's value
@@ -27,10 +31,11 @@
 //   t <semitones>           KEY TRANSPOSE (0: off, its light out)
 //   p <off|load|store> <key>   (Pico) the patch button armed, if any, and the key of the patch last
 //                           loaded or stored (0: none), when either changes
-//   load <avg%> <busiest%> <underruns>   (Pico) once a second
+//   load <avg%> <busiest%> <underruns> <loop µs> <late> <latest µs>   (Pico) once a second: the audio
+//                           core's load, core 0's longest loop pass, events applied late and how late the latest was
+//   page <hash> <size>      (Pico) the page: 16 hex digits of its FNV-1a 64 hash, and its size in bytes
 //   # <text>                (USB serial) a log line for people; GUIs ignore it
 #pragma once
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -54,7 +59,8 @@ struct Line
         legato,    // value: 1 down, 0 up
         keyTranspose,
         patch, // id: 0 load, 1 store
-        ping
+        ping,
+        page // id: the offset to send from, or -1 for the hash and size
     };
     Kind kind = Kind::unknown;
     int id = -1;        // value, gesture: the parameter; note: the key, 0-127; sequencer: the button
@@ -64,6 +70,16 @@ struct Line
 inline float clamp (float x, float lo, float hi)
 {
     return x < lo ? lo : x > hi ? hi : x;
+}
+
+// On the bits, through a volatile: with -ffast-math (the firmware's) a compiler may take a float for
+// finite and drop a check on it.
+inline bool finite (float x)
+{
+    uint32_t bits;
+    std::memcpy (&bits, &x, sizeof bits);
+    const volatile uint32_t seen = bits;
+    return (seen & 0x7F800000u) != 0x7F800000u;
 }
 
 // A parameter id is checked only for being 0 to 65535: the caller knows how many there are. Values that
@@ -77,6 +93,15 @@ inline Line parse (const char* text)
         line.kind = Line::Kind::ping;
     else if (std::strcmp (text, "a") == 0)
         line.kind = Line::Kind::allNotesOff;
+    else if (std::strncmp (text, "page", 4) == 0 && (text[4] == 0 || text[4] == ' '))
+    {
+        char* rest = nullptr;
+        const long offset = text[4] ? std::strtol (text + 5, &rest, 10) : -1;
+        if (text[4] && (rest == text + 5 || *rest || offset < 0 || offset > 0x1FFFFF))
+            return line;
+        line.kind = Line::Kind::page;
+        line.id = int (offset);
+    }
     else if (text[0] && text[1] == ' ')
     {
         char* rest = nullptr;
@@ -91,7 +116,7 @@ inline Line parse (const char* text)
                     return line;
                 line.id = int (n);
                 line.value = std::strtof (rest, nullptr);
-                if (! std::isfinite (line.value))
+                if (! finite (line.value))
                     return Line {};
                 line.kind = text[0] == 'v'   ? Line::Kind::value
                             : text[0] == 'g' ? Line::Kind::gesture
@@ -107,7 +132,7 @@ inline Line parse (const char* text)
             case 'm':
             {
                 const float value = std::strtof (text + 2, nullptr);
-                if (! std::isfinite (value))
+                if (! finite (value))
                     return line;
                 line.kind = text[0] == 'b' ? Line::Kind::bend : Line::Kind::mod;
                 line.value = clamp (value, text[0] == 'b' ? -1.0f : 0.0f, 1.0f);
@@ -142,6 +167,40 @@ inline Line parse (const char* text)
         }
     }
     return line;
+}
+
+inline void pageLine (char* out, size_t size, uint64_t hash, uint32_t bytes)
+{
+    std::snprintf (out, size, "page %08lx%08lx %lu", (unsigned long) (hash >> 32), (unsigned long) (hash & 0xFFFFFFFFu),
+                   (unsigned long) bytes);
+}
+
+// The page's bytes over USB MIDI, where a SysEx byte has 7 bits: F0 7D 50 50 <offset: 3 bytes, high first>
+// <data> F7, the data in groups of up to 7 bytes, each group led by a byte holding their top bits (bit i:
+// byte i's). out needs pageChunkSize (n) bytes; returns that.
+constexpr uint8_t pageChunkId[] = { 0xF0, 0x7D, 0x50, 0x50 };
+constexpr size_t pageChunkSize (size_t n) { return sizeof pageChunkId + 3 + n + (n + 6) / 7 + 1; }
+
+inline size_t pageChunk (uint8_t* out, uint32_t offset, const uint8_t* data, size_t n)
+{
+    uint8_t* at = out;
+    for (uint8_t b : pageChunkId)
+        *at++ = b;
+    *at++ = uint8_t (offset >> 14 & 0x7F);
+    *at++ = uint8_t (offset >> 7 & 0x7F);
+    *at++ = uint8_t (offset & 0x7F);
+    for (size_t i = 0; i < n; i += 7)
+    {
+        uint8_t& high = *at++;
+        high = 0;
+        for (size_t j = 0; j < 7 && i + j < n; ++j)
+        {
+            high |= uint8_t (data[i + j] >> 7 << j);
+            *at++ = data[i + j] & 0x7F;
+        }
+    }
+    *at++ = 0xF7;
+    return size_t (at - out);
 }
 
 inline void valueLine (char* out, size_t size, int id, float value)

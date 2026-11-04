@@ -75,8 +75,8 @@ struct Control
             patchChanged();
     }
 
-    // velocity 0-65535; 0 is note off. While a patch button is armed, the next key in range picks the slot:
-    // a load plays the key as usual, a store doesn't.
+    // velocity 0-65535; 0 is note off. While a patch button is armed, the next key in range picks the slot
+    // and doesn't play.
     void note (uint8_t key, uint16_t velocity, EventPort port, uint8_t channel = 0)
     {
         if (armed != unarmed && velocity && key >= firstPatchKey && key < firstPatchKey + patchSlots)
@@ -88,8 +88,7 @@ struct Control
                 patchSlot = slot;
             if (patchChanged)
                 patchChanged();
-            if (button == armedStore)
-                return;
+            return;
         }
         Event e = make (velocity ? EVENT_NOTE_ON : EVENT_NOTE_OFF, port);
         e.note.channel = channel;
@@ -164,7 +163,23 @@ struct Control
             changed (id, value, port);
     }
 
+    // Stamps what f sends with timeUs instead of now: when a DIN message's last byte arrived.
+    template <typename F>
+    void at (uint32_t timeUs, F&& f)
+    {
+        const bool had = haveStamp;
+        const uint32_t was = stampUs;
+        haveStamp = true;
+        stampUs = timeUs;
+        f();
+        haveStamp = had;
+        stampUs = was;
+    }
+
 private:
+    bool haveStamp = false;
+    uint32_t stampUs = 0;
+
     void markKey (int key, bool down, EventPort port)
     {
         if (isDown (key) == down)
@@ -184,7 +199,7 @@ private:
 
     void stampAndSend (Event& e)
     {
-        e.timeUs = nowUs ? nowUs() : 0;
+        e.timeUs = haveStamp ? stampUs : nowUs ? nowUs() : 0;
         if (send)
             send (e);
     }

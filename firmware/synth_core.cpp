@@ -37,22 +37,28 @@ bool tracingBlock = false;
 #include "flash_saves.h"
 #include "synth_host.h"
 
+#if PICOH_TRACE
 alignas (8) static uint8_t traceBytes[trace::ringBytes];
 trace::Ring trace::ring { traceBytes };
+#else
+trace::Ring trace::ring { nullptr };
+#endif
 trace::Core0Log trace::core0;
 trace::Ring* trace::dspRing = nullptr;
 
 namespace
 {
 uint32_t dmaBuffers[2][audio::blockFrames]; // one stereo frame per word: left in the top half
-float left[audio::blockFrames], right[audio::blockFrames];
+Synth::Sample left[audio::blockFrames], right[audio::blockFrames];
 int dmaChannel;
 volatile int fillIndex;   // the buffer the render loop fills next
 volatile bool filled;     // whether it has finished filling it
 queue_t* events;
 SynthHost synth;
+EventScheduler<SynthHost> scheduler (synth, audio::sampleRate, audio::blockFrames * 1000000u / audio::sampleRate);
 
-std::atomic<uint32_t> busiestUs { 0 }, totalUs { 0 }, blockCount { 0 }, underruns { 0 };
+std::atomic<uint32_t> busiestUs { 0 }, totalUs { 0 }, blockCount { 0 }, underruns { 0 }, lateEvents { 0 },
+    latestUs { 0 };
 
 // The sequencer's state for core 0, packed; and a newly loaded sequence, handed over once to be saved.
 std::atomic<uint32_t> sequencerPacked { 0 };
@@ -121,6 +127,20 @@ void startI2s()
     dma_channel_start (dmaChannel);
 }
 
+#if PICOH_FIXED_POINT
+// Q27 to 16 bits, clipped.
+inline uint32_t toFrame (int32_t l, int32_t r)
+{
+    auto toInt = [] (int32_t x)
+    {
+        constexpr int32_t one = 1 << 27;
+        x = x < -one ? -one : x > one ? one : x;
+        return uint32_t (uint16_t (int16_t (((x >> 11) * 32767 + (1 << 15)) >> 16)));
+    };
+    return toInt (l) << 16 | toInt (r);
+}
+#endif
+
 inline uint32_t toFrame (float l, float r)
 {
     auto toInt = [] (float x)
@@ -135,10 +155,12 @@ inline uint32_t toFrame (float l, float r)
 
 void run()
 {
+#if __ARM_FP
     // Flush denormals to zero on this core, so decaying filters and envelopes stay fast.
     uint32_t fpscr;
     asm volatile ("vmrs %0, fpscr" : "=r"(fpscr));
     asm volatile ("vmsr fpscr, %0" : : "r"(fpscr | (1u << 24)));
+#endif
 
     synth.prepare (float (audio::sampleRate), audio::blockFrames);
     if (picohDSP::Sequence stored; flashSaves::readSequence (stored))
@@ -148,7 +170,6 @@ void run()
     // High while this core works on a block, for a scope.
     gpio_init (audio::busyPin);
     gpio_set_dir (audio::busyPin, GPIO_OUT);
-    EventScheduler<SynthHost> scheduler (synth, audio::sampleRate, audio::blockFrames * 1000000u / audio::sampleRate);
     startI2s();
     rendering.store (true, std::memory_order_release);
     renderLoop (scheduler);
@@ -163,7 +184,7 @@ void run()
     {
         while (filled)
             tight_loop_contents();
-        uint32_t startUs = time_us_32();
+        const uint32_t startUs = time_us_32();
         gpio_put (audio::busyPin, true);
         uint32_t* out = dmaBuffers[fillIndex];
         tracingBlock =
@@ -188,6 +209,12 @@ void run()
         blockCount.fetch_add (1, std::memory_order_relaxed);
         if (tookUs > busiestUs.load (std::memory_order_relaxed))
             busiestUs.store (tookUs, std::memory_order_relaxed);
+        if (scheduler.late)
+        {
+            lateEvents.fetch_add (scheduler.late, std::memory_order_relaxed);
+            if (scheduler.latestUs > latestUs.load (std::memory_order_relaxed))
+                latestUs.store (scheduler.latestUs, std::memory_order_relaxed);
+        }
     }
 }
 } // namespace
@@ -232,6 +259,8 @@ Load takeLoad()
     load.average = blocks ? 100.0f * float (total) / float (blocks) / blockUs : 0.0f;
     load.busiest = 100.0f * float (busiest) / blockUs;
     load.underruns = underruns.exchange (0, std::memory_order_relaxed);
+    load.late = lateEvents.exchange (0, std::memory_order_relaxed);
+    load.latestUs = latestUs.exchange (0, std::memory_order_relaxed);
     return load;
 }
 } // namespace audio

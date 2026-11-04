@@ -131,6 +131,46 @@ static void scheduler()
     queue = { p };
     r.render (pop, 100000, l, rr, 64);
     CHECK (synth.log.size() == 1 && synth.log[0] == "p 3 @128");
+    CHECK (r.late == 1 && r.latestUs == 100000 - 1000);
+
+    // queued out of order (USB polled before DIN's older bytes): applied in time order, on time; the
+    // same time in the order they came
+    synth.log.clear();
+    Event a = event (EVENT_NOTE_ON, 200600), b = event (EVENT_NOTE_ON, 200100), c = event (EVENT_NOTE_OFF, 200100);
+    a.note.key = 61;
+    queue = { a, b, c };
+    r.render (pop, 200000, l, rr, 64); // b and c at 201100 us: sample 53
+    r.render (pop, 201333, l, rr, 64); // a at 201600 us: sample 64 + 13
+    CHECK (synth.log.size() == 3);
+    CHECK (synth.log[0] == "on 60 @245" && synth.log[1] == "off 60 @245" && synth.log[2] == "on 61 @269");
+    CHECK (r.late == 0);
+
+    // a full queue kept for the next block, then another full queue: a note off first and its note on,
+    // stamped earlier, last. All of them are applied in one block, in time order
+    synth.log.clear();
+    const uint32_t s = 1000000;
+    queue.clear();
+    for (int i = 0; i < eventQueueCapacity; ++i)
+        queue.push_back (event (EVENT_NOTE_ON, s + 400)); // due at s + 1400: sample 3 of the next block
+    r.render (pop, s, l, rr, 64);
+    CHECK (synth.log.empty() && queue.empty());
+    Event older = event (EVENT_NOTE_ON, s + 340), newer = event (EVENT_NOTE_OFF, s + 350);
+    older.note.key = newer.note.key = 70;
+    queue.push_back (newer);
+    Event filler = event (EVENT_PARAM, s + 360);
+    filler.param.id = 4;
+    for (int i = 0; i < eventQueueCapacity - 2; ++i)
+        queue.push_back (filler);
+    queue.push_back (older);
+    const int at = synth.sample;
+    r.render (pop, s + 1333, l, rr, 64);
+    CHECK (queue.empty() && r.applied == 2 * eventQueueCapacity && r.late == 0);
+    CHECK (synth.log.size() == size_t (2 * eventQueueCapacity));
+    CHECK (synth.log[0] == "on 70 @" + std::to_string (at) && synth.log[1] == "off 70 @" + std::to_string (at + 1));
+    CHECK (synth.log[2] == "p 4 @" + std::to_string (at + 1));
+    CHECK (synth.log[eventQueueCapacity - 1] == "p 4 @" + std::to_string (at + 1));
+    CHECK (synth.log[eventQueueCapacity] == "on 60 @" + std::to_string (at + 3));
+    CHECK (synth.log.back() == "on 60 @" + std::to_string (at + 3));
 }
 
 static std::vector<Event> sent;
@@ -343,10 +383,41 @@ static void guiLines_()
     CHECK (std::string (line) == "p store 41");
     guiLines::patchLine (line, sizeof line, 0, 0);
     CHECK (std::string (line) == "p off 0");
+
+    CHECK (guiLines::parse ("page").kind == Kind::page && guiLines::parse ("page").id == -1);
+    CHECK (guiLines::parse ("page 2097151").kind == Kind::page && guiLines::parse ("page 2097151").id == 2097151);
+    for (const char* bad : { "page ", "page x", "page -1", "page 2097152", "page 1 2", "pages" })
+        CHECK (guiLines::parse (bad).kind == Kind::unknown);
+    guiLines::pageLine (line, sizeof line, 0x3b54f5b04a477504ull, 183174);
+    CHECK (std::string (line) == "page 3b54f5b04a477504 183174");
+
+    // Every byte value, at an offset using all three bytes; app/src/page.rs decodes the same message.
+    uint8_t data[256], message[guiLines::pageChunkSize (256)];
+    for (int i = 0; i < 256; ++i)
+        data[i] = uint8_t (255 - i);
+    const size_t length = guiLines::pageChunk (message, 0x1ABCDE, data, 9);
+    const std::vector<uint8_t> nine (message, message + length);
+    CHECK ((nine == std::vector<uint8_t> { 0xF0, 0x7D, 0x50, 0x50, 0x6A, 0x79, 0x5E, 0x7F, 0x7F, 0x7E, 0x7D, 0x7C,
+                                           0x7B, 0x7A, 0x79, 0x03, 0x78, 0x77, 0xF7 }));
+    CHECK (guiLines::pageChunk (message, 0, data, 256) == guiLines::pageChunkSize (256));
+    bool sevenBits = message[0] == 0xF0 && message[guiLines::pageChunkSize (256) - 1] == 0xF7;
+    for (size_t i = 1; i + 1 < guiLines::pageChunkSize (256); ++i)
+        sevenBits = sevenBits && message[i] < 0x80;
+    CHECK (sevenBits);
+    // Decoded back.
+    uint8_t back[256];
+    size_t got = 0;
+    for (size_t at = 7; at + 1 < guiLines::pageChunkSize (256); at += 8)
+    {
+        const uint8_t high = message[at];
+        for (size_t j = 0; j < 7 && at + 1 + j + 1 < guiLines::pageChunkSize (256); ++j)
+            back[got++] = uint8_t (message[at + 1 + j] | (high >> j & 1) << 7);
+    }
+    CHECK (got == 256 && std::memcmp (back, data, 256) == 0);
 }
 
 // LOAD and STORE: armed by their button (again: disarmed), the next key from 41 to 72, from any input,
-// picks the slot. A load plays the key, a store doesn't; keys outside leave it armed.
+// picks the slot and doesn't play; keys outside leave it armed.
 static std::vector<std::pair<char, int>> patchCalls;
 static int patchTold = 0;
 static void patchButtons_()
@@ -387,14 +458,15 @@ static void patchButtons_()
     guis.receive (web, "p store");
     guis.receive (web, "p load"); // the other button takes over
     CHECK (c.armed == Control::armedLoad);
-    guis.receive (web, "n 48 1"); // slot 7, empty: nothing loaded, disarmed, plays
+    const size_t before = sent.size();
+    guis.receive (web, "n 48 1"); // slot 7, empty: nothing loaded, disarmed
     CHECK (patchCalls.back() == std::make_pair ('l', 7) && c.patchSlot == 4 && c.armed == Control::unarmed);
-    CHECK (sent.back().type == EVENT_NOTE_ON && sent.back().note.key == 48);
+    CHECK (sent.size() == before && ! c.isDown (48));
 
     guis.receive (web, "p load");
     c.note (72, 30000, EVENT_PORT_DIN);
     CHECK (patchCalls.back() == std::make_pair ('l', 31) && c.patchSlot == 31);
-    CHECK (sent.back().type == EVENT_NOTE_ON && sent.back().note.key == 72);
+    CHECK (sent.size() == before && ! c.isDown (72));
     c.note (72, 30000, EVENT_PORT_DIN); // disarmed: just a key
     CHECK (patchCalls.size() == 3);
 

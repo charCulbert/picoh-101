@@ -1,10 +1,16 @@
 // Core 0: USB (MIDI, and the GUI over serial or SysEx), DIN MIDI and Wi-Fi in; events out to the audio
 // core through one queue.
+#include <algorithm>
 #include <cstdio>
 #include "board.h"
+#include "DSP/picohDSP_Voice.h"
 #include "params.h"
 #include "flash_saves.h"
 #include "pico/stdlib.h"
+#if PICO_RP2040
+#include "hardware/clocks.h"
+#include "hardware/vreg.h"
+#endif
 #include "trace.h"
 
 namespace
@@ -14,6 +20,8 @@ Control control;
 Guis guis;
 bool haveWeb = false;
 uint32_t droppedEvents = 0;
+
+uint32_t longestPassUs = 0; // core 0's loop, this second: how late a USB or Wi-Fi input can be stamped
 
 void send (const Event& e)
 {
@@ -43,8 +51,48 @@ void patchChanged()
     toGuis (line, nullptr);
 }
 
-// The slot loaded or stored last, for power on: written from the control loop, after the key's note.
+// The slot loaded or stored last, for power on: written later, from the control loop, once a load's
+// values have all gone out (a flash write holds the control loop up).
 int slotToRemember = -1;
+
+// A loaded patch's values go to the audio core loadGroup at a time, a tick apart, each group sharing a
+// stamp: a load is never one burst in one block.
+constexpr int loadGroup = 4;
+constexpr uint32_t tickUs = picohDSP::Voice::tickLength * 1000000u / audio::sampleRate;
+float loading[params::count];
+int loadingFrom = params::count; // the next id to send
+uint32_t nextGroupUs = 0;
+
+// The next group when its time comes. VOLUME, ARPEGGIO and HOLD aren't in a patch: they stay as they are.
+void sendLoading()
+{
+    const uint32_t now = time_us_32();
+    if (loadingFrom >= params::count || int32_t (now - nextGroupUs) < 0)
+        return;
+    nextGroupUs = now + tickUs;
+    // The group goes out first, then the GUIs hear of it: a line to each takes long enough that the
+    // group's last value could miss the block its stamp is due in.
+    int sent[params::count];
+    int count = 0;
+    const auto changed = control.changed;
+    control.changed = nullptr;
+    control.at (now,
+                [&]
+                {
+                    for (; loadingFrom < params::count && count < loadGroup; ++loadingFrom)
+                        if (patches::kept (loadingFrom) && loading[loadingFrom] != control.values[loadingFrom])
+                        {
+                            control.setValue (loadingFrom, loading[loadingFrom], EVENT_PORT_USB);
+                            sent[count++] = loadingFrom;
+                        }
+                });
+    control.changed = changed;
+    const Gui* sender = guis.sender;
+    guis.sender = nullptr; // the GUI whose key loaded it shows it too
+    for (int i = 0; i < count; ++i)
+        changed (sent[i], control.values[sent[i]], EVENT_PORT_USB);
+    guis.sender = sender;
+}
 
 bool loadPatch (int slot)
 {
@@ -55,12 +103,10 @@ bool loadPatch (int slot)
         usb::log ("patch %d empty", slot + 1);
         return false;
     }
-    const Gui* sender = guis.sender;
-    guis.sender = nullptr; // the GUI whose key loaded it shows it too
-    for (int id = 0; id < params::count; ++id)
-        if (values[id] != control.values[id])
-            control.setValue (id, values[id], EVENT_PORT_USB);
-    guis.sender = sender;
+    std::memcpy (loading, values, sizeof values);
+    loadingFrom = 0;
+    nextGroupUs = time_us_32();
+    sendLoading();
     slotToRemember = slot;
     usb::log ("patch %d loaded", slot + 1);
     return true;
@@ -68,8 +114,13 @@ bool loadPatch (int slot)
 
 bool storePatch (int slot)
 {
+    // A load still going out goes on in its groups; the patch stored is where it ends.
+    float values[params::count];
+    std::memcpy (values, control.values, sizeof values);
+    for (int id = loadingFrom; id < params::count; ++id)
+        values[id] = loading[id];
     const uint32_t t0 = time_us_32();
-    const auto saved = flashSaves::patchMemory.store (slot, control.values);
+    const auto saved = flashSaves::patchMemory.store (slot, values);
     usb::log ("patch %d %s in %lu us", slot + 1, said (saved), (unsigned long) (time_us_32() - t0));
     if (saved == flashRing::Saved::failed)
         return false;
@@ -79,7 +130,7 @@ bool storePatch (int slot)
 
 void rememberSlot()
 {
-    if (slotToRemember < 0)
+    if (slotToRemember < 0 || loadingFrom < params::count)
         return;
     const auto saved = flashSaves::patchMemory.remember (slotToRemember);
     if (saved == flashRing::Saved::failed)
@@ -163,20 +214,38 @@ void reportLoad()
         return;
     nextUs = now + 1000000;
     audio::Load load = audio::takeLoad();
-    char line[64];
-    snprintf (line, sizeof line, "load %.1f %.1f %lu", double (load.average), double (load.busiest),
-              (unsigned long) load.underruns);
+    char line[80];
+    snprintf (line, sizeof line, "load %.1f %.1f %lu %lu %lu %lu", double (load.average), double (load.busiest),
+              (unsigned long) load.underruns, (unsigned long) longestPassUs, (unsigned long) load.late,
+              (unsigned long) load.latestUs);
+    longestPassUs = 0;
     toGuis (line, nullptr);
     guiLines::keysLine (line, sizeof line, control.keysDown);
     toGuis (line, nullptr);
     if (droppedEvents)
         usb::log ("%lu events dropped (queue full)", (unsigned long) droppedEvents);
+    droppedEvents = 0;
 }
 } // namespace
 
+// std::terminate's default handler prints the exception's name, which links in a C++ demangler.
+namespace __gnu_cxx
+{
+void __verbose_terminate_handler()
+{
+    panic ("terminate");
+}
+} // namespace __gnu_cxx
+
 int main()
 {
-    queue_init (&events, sizeof (Event), 128);
+#if PICO_RP2040
+    // The fixed-point voice needs 250 MHz, at 1.2 V: set before anything takes its clock from clk_sys.
+    vreg_set_voltage (VREG_VOLTAGE_1_20);
+    sleep_ms (10);
+    set_sys_clock_khz (250000, true);
+#endif
+    queue_init (&events, sizeof (Event), eventQueueCapacity);
     control.send = send;
     control.changed = knobMoved;
     control.wheelMoved = wheelMoved;
@@ -212,9 +281,12 @@ int main()
 #endif
         uint32_t t3 = time_us_32();
         trace::core0.span (trace::webPoll, t2, t3, 0, trace::ring);
+        sendLoading();
         reportLoad();
         followSequencer();
         rememberSlot();
-        trace::core0.span (trace::loadReport, t3, time_us_32(), 0, trace::ring);
+        const uint32_t t4 = time_us_32();
+        trace::core0.span (trace::loadReport, t3, t4, 0, trace::ring);
+        longestPassUs = std::max (longestPassUs, t4 - t0);
     }
 }

@@ -29,14 +29,23 @@ if ! inBootloader; then
     inBootloader || { echo "$port didn't come up in its bootloader."; exit 1; }
 fi
 
-# The chip must be the one the UF2 is for (the family id in its last block: an RP2350 UF2 starts with a
-# block for any chip).
-family=$(od -An -tx4 -j$(($(wc -c < "$uf2") - 512 + 28)) -N4 "$uf2" | tr -d ' ')
+# The chip must be one the UF2 is for: an RP2040 block anywhere for the RP2040; for the RP2350 the last
+# block's family, the RP2350's or any chip's (an RP2350 UF2 starts with a block for any chip; one for both
+# chips is the RP2040's blocks, then the same for any chip).
+families=$(od -An -v -tx4 "$uf2" | awk 'NR % 32 == 2 { print $4 }')
+last=$(echo "$families" | tail -1)
 chip=$("$picotool" info -d 2>/dev/null | sed -n 's/^ *type: *//p' | head -1)
-case "$family:$chip" in
-    e48bff56:RP2040 | e48bff59:RP2350) ;;
+case "$chip" in
+    RP2040) echo "$families" | grep -q e48bff56 && family=ok ;;
+    RP2350) case "$last" in e48bff59 | e48bff57) family=ok ;; esac ;;
+esac
+case "$family" in
+    ok) ;;
     *) echo "The board in its bootloader is ${chip:-unknown}, not the chip this UF2 is for: not flashing."
        "$picotool" reboot >/dev/null 2>&1 || true
        exit 1 ;;
 esac
-"$picotool" load -x "$uf2"
+# picotool loads only a UF2's first family: for a UF2 for both chips on an RP2350, its other half.
+set --
+[ "$chip:$last" = RP2350:e48bff57 ] && set -- --family absolute
+"$picotool" load -x "$@" "$uf2"

@@ -32,6 +32,21 @@ struct SynthHost
     void setSequence (const picohDSP::Sequence& s) { synth.setSequence (s); }
     uint32_t sequenceVersion() const { return synth.getSequenceVersion(); }
 
+#if PICOH_FIXED_POINT
+    // left and right in Q27; the volume, gain and rate in Q30.
+    void render (int32_t* left, int32_t* right, int frames)
+    {
+        synth.render (left, right, frames);
+        const int32_t target = picohDSP::fixed::toQ30 (synth.getVolume());
+        constexpr int32_t rate = int32_t (0.004 * (1 << 30));
+        for (int i = 0; i < frames; ++i)
+        {
+            gain += picohDSP::fixed::mul (target - gain, rate, 30);
+            left[i] = picohDSP::fixed::mul (left[i], gain, 30);
+            right[i] = picohDSP::fixed::mul (right[i], gain, 30);
+        }
+    }
+#else
     void render (float* left, float* right, int frames)
     {
         synth.render (left, right, frames);
@@ -44,6 +59,7 @@ struct SynthHost
             right[i] *= gain;
         }
     }
+#endif
 
 private:
     static picohDSP::Note note (uint8_t key)
@@ -54,5 +70,9 @@ private:
     }
 
     Synth synth;
+#if PICOH_FIXED_POINT
+    int32_t gain = 0;
+#else
     float gain = 0.0f;
+#endif
 };

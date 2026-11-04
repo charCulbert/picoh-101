@@ -10,7 +10,8 @@ options: --port /dev/cu.usbmodemX  --wait seconds (default 120)  --out file.json
          --play   play notes through the same port while it records (a note every 0.25 s, legato every
                   other one), for a test that repeats
 
-Close the browser page's USB serial connection first: only one program can have the port. The trace is read
+Needs a TRACE build (firmware/build-trace, -DTRACE=ON; the normal build has no trace). Close the browser
+page's USB serial connection first: only one program can have the port. The trace is read
 only after the ring froze, so reading it out doesn't disturb what it measured.
 """
 import json
@@ -104,6 +105,8 @@ def capture(port, command, wait, play=False):
                 status = status_of(line)
         if status and status['state'] == 'frozen':
             break
+        if not status and time.time() - start > 3:
+            sys.exit('no reply to "trace status": flash a TRACE build first (cmake -B firmware/build-trace -DTRACE=ON)')
         if status:
             print(f"\r  {status['state']}: {status['blocks']} blocks", end='', flush=True)
     print()

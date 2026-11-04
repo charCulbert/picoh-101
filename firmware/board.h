@@ -10,7 +10,11 @@
 namespace audio
 {
 constexpr uint32_t sampleRate = 48000;
-constexpr int blockFrames = 64; // 1.33 ms
+#if PICO_RP2040
+constexpr int blockFrames = 64; // 1.33 ms: at 32 the busiest block passes 92%
+#else
+constexpr int blockFrames = 32; // 0.67 ms
+#endif
 // BCLK and LRCLK are the PIO program's side-set pins, which must be consecutive; DIN can be any pin.
 constexpr unsigned bclkPin = 19;
 constexpr unsigned lrclkPin = 20;
@@ -25,6 +29,7 @@ struct Load
 {
     float average, busiest; // percent of a block's time spent rendering it
     uint32_t underruns;     // blocks that weren't ready when their turn came
+    uint32_t late, latestUs; // events applied after their sample, and the latest by how long
 };
 // Since the last call.
 Load takeLoad();

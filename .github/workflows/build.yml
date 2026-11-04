@@ -1,7 +1,7 @@
 name: Build
 
-# Builds the CLAP on macOS, Windows and Linux and validates it, the WCLAP, and the firmware for the
-# Pico 2 W and the Pico 2, and runs the desktop checks. A tag v* also makes a draft release with all of them.
+# Builds the CLAP on macOS, Windows and Linux and validates it, the WCLAP, and the firmware: one UF2 for the
+# Pico 2 W, one for the Pico and the Pico 2; and runs the desktop checks. A tag v* also makes a draft release with all of them.
 on:
   push:
     branches: ["**"]
@@ -106,12 +106,16 @@ jobs:
           if-no-files-found: error
 
   firmware:
-    name: Firmware (${{ matrix.board }})
+    name: Firmware (${{ matrix.uf2 }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        board: [pico2_w, pico2]
+        include:
+          - uf2: PICOH-101-W # Pico 2 W
+            boards: pico2_w
+          - uf2: PICOH-101 # Pico (RP2040) and Pico 2, in one
+            boards: pico pico2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,12 +129,20 @@ jobs:
 
       - name: Build
         run: |
-          cmake -S firmware -B firmware/build -DPICO_BOARD=${{ matrix.board }}
-          cmake --build firmware/build --target synth --parallel 4
-          mkdir out && cp firmware/build/synth.uf2 "out/$NAME-${{ matrix.board }}.uf2"
+          for board in ${{ matrix.boards }}; do
+            cmake -S firmware -B "firmware/build-$board" -DPICO_BOARD=$board
+            cmake --build "firmware/build-$board" --target synth --parallel 4
+          done
+          mkdir out
+          if [ -d firmware/build-pico ]; then
+            cmake --build firmware/build-pico2 --target universal
+            cp firmware/build-pico2/PICOH-101.uf2 "out/${{ matrix.uf2 }}.uf2"
+          else
+            cp firmware/build-pico2_w/synth.uf2 "out/${{ matrix.uf2 }}.uf2"
+          fi
 
       - uses: actions/upload-artifact@v4
-        if: matrix.board == 'pico2'
+        if: matrix.uf2 == 'PICOH-101'
         with:
           name: notices
           path: |
@@ -139,7 +151,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: uf2-${{ matrix.board }}
+          name: uf2-${{ matrix.uf2 }}
           path: out/
           if-no-files-found: error
 

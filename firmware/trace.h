@@ -12,7 +12,7 @@
 //   BLOCK_END (wide)    a pieces, b events applied, x flash cache hits, y flash cache accesses (this block;
 //                       both cores' accesses: the cache is shared)
 //
-// TRACE_DSP adds the synth's points (picohDSP_TraceHook.h, via trace_dsp.h): 8-byte records, b the arg.
+// The synth's points too (picohDSP_TraceHook.h, via trace_dsp.h): 8-byte records, b the arg.
 //
 // One writer, the audio core, so nothing locks. The control core changes the state only through control(),
 // which stops the writer (state idle) before it touches anything else and starts it last. It reads the ring
@@ -22,6 +22,8 @@
 // not fit. Or watch: record round the ring until a block takes more than the threshold, then record `post`
 // more blocks and freeze. The ring wraps only at a block start, and `tail` is kept on the oldest whole
 // block, so a frozen ring reads out as whole blocks in order.
+//
+// Only in a TRACE build (CMake option); otherwise the same classes do nothing.
 #include <atomic>
 #include <cstdint>
 #include "DSP/picohDSP_TraceHook.h"
@@ -65,16 +67,40 @@ enum Mode : uint32_t
     overMode = 2
 };
 
+// What the control core did, for core 0's spans (Core0Log).
+enum Core0Kind : uint8_t
+{
+    usbPoll = 1,
+    dinPoll = 2,
+    webPoll = 3,
+    pageLine = 4,
+    loadReport = 5
+};
+
+#if PICOH_TRACE
 // A block's records are at most blockMaxBytes. With the synth's stamps a render piece writes about 3
 // records, 2 more per voice and 3 more per voice that renders.
 constexpr uint32_t ringBytes = 32768, blockMaxBytes = 1024;
 constexpr uint32_t noBlock = 0xFFFFFFFFu;
 
+#if PICO_RP2040
+// Core 1's SysTick, counting down 24 bits, widened here: it is read far more often than it wraps (67 ms).
+inline uint32_t cycleCounter()
+{
+    static uint32_t last = 0, high = 0;
+    const uint32_t now = 0xFFFFFFu - (*reinterpret_cast<volatile uint32_t*> (0xE000E018u) & 0xFFFFFFu);
+    if (now < last)
+        high += 1u << 24;
+    last = now;
+    return high | now;
+}
+#else
 // Core 1's cycle counter (Armv8-M DWT). Each core has its own.
 inline uint32_t cycleCounter()
 {
     return *reinterpret_cast<volatile uint32_t*> (0xE0001004u);
 }
+#endif
 
 class Ring
 {
@@ -86,8 +112,14 @@ public:
     // The audio core, once at start: turns its cycle counter on. cyclesPerBlock: a block's time in cycles.
     void startCycleCounter (uint32_t cyclesPerBlock)
     {
+#if PICO_RP2040
+        *reinterpret_cast<volatile uint32_t*> (0xE000E014u) = 0xFFFFFFu; // SYST_RVR
+        *reinterpret_cast<volatile uint32_t*> (0xE000E018u) = 0;         // SYST_CVR
+        *reinterpret_cast<volatile uint32_t*> (0xE000E010u) = 5u;        // SYST_CSR: on, the core's clock
+#else
         *reinterpret_cast<volatile uint32_t*> (0xE000EDFCu) |= 1u << 24; // DEMCR.TRCENA
         *reinterpret_cast<volatile uint32_t*> (0xE0001000u) |= 1u;       // DWT_CTRL.CYCCNTENA
+#endif
         blockBudget = cyclesPerBlock;
     }
 
@@ -265,14 +297,6 @@ private:
 // The control core's work, for the same timeline: what it did (Core0Kind) and from when to when, in
 // microseconds (the timer both cores read). Spans shorter than minUs aren't kept. Written while the ring
 // above is recording, frozen with it.
-enum Core0Kind : uint8_t
-{
-    usbPoll = 1,
-    dinPoll = 2,
-    webPoll = 3,
-    pageLine = 4,
-    loadReport = 5
-};
 
 class Core0Log
 {
@@ -306,6 +330,28 @@ private:
     Span spans[entries];
     uint32_t next = 0;
 };
+
+#else
+
+class Ring
+{
+public:
+    constexpr explicit Ring (uint8_t*) {}
+    void startCycleCounter (uint32_t) {}
+    bool active() const { return false; }
+    bool blockStart (uint32_t, uint32_t, uint32_t) { return false; }
+    void stamp (Point, uint8_t, uint16_t) {}
+    void stamp (dsp::Point, uint16_t) {}
+    void stampWide (Point, uint8_t, uint16_t, uint32_t, uint32_t) {}
+    void blockEnd (uint8_t, uint16_t) {}
+};
+
+class Core0Log
+{
+public:
+    void span (Core0Kind, uint32_t, uint32_t, uint8_t, const Ring&) {}
+};
+#endif
 
 // The ring, core 0's log, and the ring the synth's stamps go to (set per recorded block).
 extern Ring ring;

@@ -2,6 +2,7 @@
 // non-commercial ID, 50 48 is "PH") and a serial port (the same lines, and "# " log lines).
 #include "board.h"
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -9,7 +10,12 @@
 #include "pico/time.h"
 #include "tusb.h"
 #include "trace.h"
+#include "web_files.generated.h"
 #include "hardware/clocks.h"
+#if PICO_RP2040
+#include "hardware/vreg.h"
+#include "pico/multicore.h"
+#endif
 
 namespace
 {
@@ -42,21 +48,86 @@ void serialWrite (const char* line)
     tud_cdc_write_flush();
 }
 
-void sysexWrite (const char* line)
+// The line as one SysEx message, its length; 0 if it doesn't fit.
+size_t toSysex (uint8_t* message, size_t capacity, const char* line)
 {
-    if (! sysexOpen)
-        return;
-    uint8_t message[200];
     size_t n = strlen (line);
-    if (n + sizeof sysexId + 1 > sizeof message)
-        return;
+    if (n + sizeof sysexId + 1 > capacity)
+        return 0;
     memcpy (message, sysexId, sizeof sysexId);
     for (size_t i = 0; i < n; ++i)
         message[sizeof sysexId + i] = uint8_t (line[i]) & 0x7F;
     message[sizeof sysexId + n] = 0xF7;
-    tud_midi_stream_write (0, message, uint32_t (sizeof sysexId + n + 1));
+    return sizeof sysexId + n + 1;
 }
 
+void sysexSend (const char* line)
+{
+    uint8_t message[200];
+    if (const size_t length = toSysex (message, sizeof message, line))
+        tud_midi_stream_write (0, message, uint32_t (length));
+}
+
+// The page going out over SysEx (gui_lines.h: page), a few USB-MIDI packets a pass so a pass stays short.
+// Lines to the SysEx GUI are dropped meanwhile, as they'd land inside a message.
+constexpr size_t pageChunkBytes = 196;
+constexpr int pagePacketsPerPass = 16; // one 64-byte USB packet
+struct PageOut
+{
+    uint32_t next = webPageSize; // the next byte to put in a message
+    uint8_t message[guiLines::pageChunkSize (pageChunkBytes)];
+    size_t length = 0, at = 0; // the message, and how much of it is out
+} pageOut;
+
+bool pageBusy()
+{
+    return pageOut.next < webPageSize || pageOut.at < pageOut.length;
+}
+
+bool pageAsked = false; // a bare `page`: its hash and size to send
+
+// The answer goes out as the chunks do, so it's whole however full the FIFO is.
+void answerPage()
+{
+    if (! pageAsked || pageBusy() || ! tud_midi_mounted())
+        return;
+    char reply[40];
+    guiLines::pageLine (reply, sizeof reply, webPageHash, webPageSize);
+    pageOut.length = toSysex (pageOut.message, sizeof pageOut.message, reply);
+    pageOut.at = 0;
+    pageAsked = false;
+}
+
+void continuePage()
+{
+    if (! tud_midi_mounted())
+        return;
+    for (int n = 0; n < pagePacketsPerPass && pageBusy(); ++n)
+    {
+        if (pageOut.at == pageOut.length)
+        {
+            const uint32_t take = std::min<uint32_t> (pageChunkBytes, webPageSize - pageOut.next);
+            pageOut.length = guiLines::pageChunk (pageOut.message, pageOut.next, webPage + pageOut.next, take);
+            pageOut.next += take;
+            pageOut.at = 0;
+        }
+        // Code index 4: SysEx starts or goes on with 3 bytes; 5, 6, 7: it ends with 1, 2 or 3.
+        const size_t left = pageOut.length - pageOut.at, bytes = left > 3 ? 3 : left;
+        uint8_t packet[4] = { uint8_t (left > 3 ? 0x4 : 0x4 + bytes), 0, 0, 0 };
+        memcpy (packet + 1, pageOut.message + pageOut.at, bytes);
+        if (! tud_midi_packet_write (packet))
+            return;
+        pageOut.at += bytes;
+    }
+}
+
+void sysexWrite (const char* line)
+{
+    if (sysexOpen && ! pageBusy())
+        sysexSend (line);
+}
+
+#if PICOH_TRACE
 // The trace (trace.h), from the serial port only (tools/trace.py):
 //   trace blocks <n>               record the next n blocks
 //   trace over <thousandths> [post] record until a block takes longer than that share of its time, then
@@ -136,19 +207,35 @@ void continueReadout()
         }
     }
 }
+#endif
 
 void serialLineIn (char* line)
 {
     if (strcmp (line, "hello") == 0)
         serialNeedsState = true;
+#if PICOH_TRACE
     else if (strncmp (line, "trace", 5) == 0)
         traceCommand (line);
+#endif
     else
         guis->receive (serialGui, line);
 }
 
 void sysexLineIn (char* line)
 {
+    const guiLines::Line page = guiLines::parse (line);
+    if (page.kind == guiLines::Line::Kind::page)
+    {
+        if (page.id >= 0)
+            pageOut.next = std::min<uint32_t> (uint32_t (page.id), webPageSize);
+        else
+        {
+            pageOut.next = webPageSize; // a GUI starting again: the answer once the chunk going out is
+            pageAsked = true;           // whole, then the page from where it asks
+        }
+        return;
+    }
+    pageOut.next = webPageSize; // the GUI's own lines: no more of the page
     sysexLastUs = time_us_32();
     if (strcmp (line, "hello") == 0)
         sysexNeedsState = true;  // a GUI arriving: every value
@@ -269,10 +356,14 @@ void poll()
     }
 
     sendStateSlowly (serialNeedsState, serialWrite, [] { return tud_cdc_write_available() >= 48; });
+#if PICOH_TRACE
     continueReadout();
     if (trace::ring.frozeSinceAsked())
         traceStatus();
-    sendStateSlowly (sysexNeedsState, sysexWrite, [] { return tud_midi_mounted(); });
+#endif
+    answerPage();
+    continuePage();
+    sendStateSlowly (sysexNeedsState, sysexWrite, [] { return tud_midi_mounted() && ! pageBusy(); });
 }
 
 void sendText (const char* line, const Gui* skip)
@@ -304,6 +395,14 @@ extern "C" void tud_cdc_line_state_cb (uint8_t, bool dtr, bool)
 
 extern "C" void tud_cdc_line_coding_cb (uint8_t, cdc_line_coding_t const* coding)
 {
-    if (coding->bit_rate == 1200)
-        reset_usb_boot (0, 0);
+    if (coding->bit_rate != 1200)
+        return;
+#if PICO_RP2040
+    // Back to the clock and voltage the bootrom expects (main() raised them); clk_usb stays on PLL_USB.
+    multicore_reset_core1();
+    set_sys_clock_khz (125000, true);
+    vreg_set_voltage (VREG_VOLTAGE_DEFAULT);
+    busy_wait_ms (10);
+#endif
+    reset_usb_boot (0, 0);
 }

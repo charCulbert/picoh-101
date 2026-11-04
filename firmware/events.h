@@ -27,6 +27,8 @@ enum EventPort : uint8_t
     EVENT_PORT_SYSEX = 4,  // the GUI over SysEx on the USB MIDI port
 };
 
+constexpr int eventQueueCapacity = 128; // core 0 to core 1
+
 struct Event
 {
     uint32_t timeUs; // microsecond clock both cores share, when it arrived. Wraps every

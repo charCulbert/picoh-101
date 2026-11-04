@@ -1,10 +1,13 @@
 #!/bin/sh
 # The desktop checks: the firmware's parts that don't touch hardware (MIDI, events, the GUI lines,
-# WebSocket, parameter tables), with the real synth; and the GUI page's TypeScript, typechecked.
+# WebSocket, parameter tables), with the real synth; the RP2040's fixed-point voice against the float one
+# (tools/check-fixed); and the GUI page's TypeScript, typechecked.
 # Usage: firmware/tools/check
 set -e
 cd "$(dirname "$0")/.."
 cmake -S tests -B build-tests -G Ninja >/dev/null
 cmake --build build-tests
 build-tests/tests
+build-tests/fast_math_lines
+tools/check-fixed
 cd ../web && { [ -f node_modules/.package-lock.json ] || npm ci --no-audit --no-fund; } && npx tsc -p . --noEmit

@@ -139,7 +139,14 @@ void readHttp (Client& c)
         return; // headers not all here yet
 
     char path[64] = "";
-    sscanf (request, "GET %63s", path);
+    if (strncmp (request, "GET ", 4) == 0)
+    {
+        const char* from = request + 4 + strspn (request + 4, " ");
+        size_t n = strcspn (from, " \r\n");
+        n = n < sizeof path ? n : sizeof path - 1;
+        memcpy (path, from, n);
+        path[n] = 0;
+    }
     size_t keyLength;
     const char* key = header (request, "Sec-WebSocket-Key:", keyLength);
 
@@ -158,6 +165,28 @@ void readHttp (Client& c)
         return;
     }
 
+    // The whole page, for the app; it sends the hash it has as If-None-Match.
+    if (strcmp (path, "/page") == 0)
+    {
+        char etag[20], reply[200];
+        snprintf (etag, sizeof etag, "\"%08lx%08lx\"", (unsigned long) (webPageHash >> 32),
+                  (unsigned long) (webPageHash & 0xFFFFFFFFu));
+        size_t matchLength;
+        const char* match = header (request, "If-None-Match:", matchLength);
+        const bool same = match && matchLength == strlen (etag) && strncmp (match, etag, matchLength) == 0;
+        int n = same ? snprintf (reply, sizeof reply,
+                                 "HTTP/1.1 304 Not Modified\r\nETag: %s\r\nConnection: close\r\n\r\n", etag)
+                     : snprintf (reply, sizeof reply,
+                                 "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %lu\r\n"
+                                 "ETag: %s\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+                                 (unsigned long) webPageSize, etag);
+        tcp_write (c.pcb, reply, uint16_t (n), TCP_WRITE_FLAG_COPY);
+        c.sending = webPage; // so sent() closes it once the rest is out
+        c.sendingLeft = same ? 0 : webPageSize;
+        c.inLength = 0;
+        continueFile (c);
+        return;
+    }
     if (strcmp (path, "/") == 0)
         strcpy (path, "/index.html");
     for (const WebFile& f : webFiles)

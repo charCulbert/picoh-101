@@ -1,5 +1,5 @@
 #pragma once
-// TRACE_DSP: -include'd into Synth.cpp, so the synth's trace points stamp into the audio core's ring.
+// TRACE builds: -include'd into Synth.cpp, so the synth's trace points stamp into the audio core's ring.
 // dspRing is set only for recorded blocks, so a point elsewhere costs a load and a test.
 #define PICOH_TRACE_POINT(point, arg)                                                                                  \
     do                                                                                                                 \

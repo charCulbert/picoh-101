@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Fails if anything core 1 can reach lives in flash, so a flash save can run without pausing it.
+# Fails if anything core 1 can reach lives in flash, so a flash save can run without pausing it; nor the DIN
+# interrupt, which runs through a save on core 0.
 # From core 1's entry, follows calls and branches, pc-relative literals (function pointers, tables,
 # vtables) and the initialised data they point at; any flash address on the way is an error. Pointers
 # only stored at run time aren't followed (the SDK's float tables, into ROM; Synth::onNoteEnded, unset).
@@ -7,7 +8,8 @@
 import re, struct, subprocess, sys
 
 objdump, elf = sys.argv[1], sys.argv[2]
-roots = ["(anonymous namespace)::renderLoop(", "(anonymous namespace)::dmaFinished("]  # synth_core.cpp
+roots = ["(anonymous namespace)::renderLoop(", "(anonymous namespace)::dmaFinished(",  # synth_core.cpp
+         "(anonymous namespace)::dinReceived("]  # din_midi.cpp
 FLASH = (0x10000000, 0x11000000)
 RAM = (0x20000000, 0x20082000)  # RP2040 0x20042000, RP2350 0x20082000
 

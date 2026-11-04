@@ -13,3 +13,6 @@ target_include_directories(tests PRIVATE ${CMAKE_CURRENT_LIST_DIR}/.. ${CMAKE_CU
                                          ${SYNTH}/elliptic-blep)
 target_compile_options(tests PRIVATE -Wall -fsanitize=undefined)
 target_link_options(tests PRIVATE -fsanitize=undefined)
+add_executable(fast_math_lines fast_math_lines.cpp)
+target_include_directories(fast_math_lines PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../protocol)
+target_compile_options(fast_math_lines PRIVATE -O2 -ffast-math)
