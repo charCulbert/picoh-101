@@ -35,6 +35,7 @@ struct Sequencer
 };
 Sequencer sequencer();
 bool takeSequence (picohDSP::Sequence&); // a sequence just loaded, to save
+bool flashFree(); // core 1 is rendering, from RAM only: flash can be written
 } // namespace audio
 
 namespace usb

@@ -3,8 +3,7 @@
 #include <cstdio>
 #include "board.h"
 #include "params.h"
-#include "sequence_flash.h"
-#include "settings_flash.h"
+#include "flash_saves.h"
 #include "pico/stdlib.h"
 #include "trace.h"
 
@@ -34,8 +33,7 @@ void toGuis (const char* line, const Gui* skip)
 // the SH-101 they're off at power on.
 constexpr uint32_t settleUs = 2000000;
 bool settingsChanged = false;
-uint32_t lastChangeUs = 0, settingsSerial = 0;
-int settingsNext = 0;
+uint32_t lastChangeUs = 0;
 
 bool isSetting (int id)
 {
@@ -44,14 +42,25 @@ bool isSetting (int id)
 
 void loadSettings()
 {
-    const settingsFlash::Record* saved = settingsFlash::newest (settingsNext);
+    const flashRing::Page* saved = flashSaves::settings.load();
+    flashSaves::sequences.load();
+    flashSaves::settings.eraseAhead();
+    flashSaves::sequences.eraseAhead();
     if (! saved)
         return;
-    settingsSerial = saved->serial;
+    float values[flashSaves::maxSettings];
+    std::memcpy (values, saved->data, saved->count * sizeof (float));
     for (int id = 0; id < saved->count && id < params::count; ++id)
         if (isSetting (id))
-            control.setValue (id, saved->values[id], EVENT_PORT_USB);
+            control.setValue (id, values[id], EVENT_PORT_USB);
     settingsChanged = false;
+}
+
+const char* said (flashRing::Saved saved)
+{
+    return saved == flashRing::Saved::written     ? "saved"
+           : saved == flashRing::Saved::unchanged ? "unchanged"
+                                                  : "NOT saved";
 }
 
 void saveSettings()
@@ -60,8 +69,12 @@ void saveSettings()
         return;
     settingsChanged = false;
     const uint32_t t0 = time_us_32();
-    const bool saved = settingsFlash::write (control.values, params::count, ++settingsSerial, settingsNext);
-    usb::log ("settings %s in %lu us", saved ? "saved" : "NOT saved", (unsigned long) (time_us_32() - t0));
+    float values[flashSaves::maxSettings];
+    const int count = params::count < flashSaves::maxSettings ? params::count : flashSaves::maxSettings;
+    for (int id = 0; id < count; ++id)
+        values[id] = isSetting (id) ? control.values[id] : 0.0f;
+    const auto saved = flashSaves::settings.write (values, count);
+    usb::log ("settings %s in %lu us", said (saved), (unsigned long) (time_us_32() - t0));
 }
 
 // The other GUIs follow; the one that moved it already shows it.
@@ -114,8 +127,8 @@ void followSequencer()
     if (picohDSP::Sequence sequence; audio::takeSequence (sequence))
     {
         const uint32_t t0 = time_us_32();
-        const bool saved = sequenceFlash::write (sequence);
-        usb::log ("sequence of %d steps %s in %lu us", sequence.length, saved ? "saved" : "NOT saved",
+        const auto saved = flashSaves::sequences.write (&sequence, sizeof sequence);
+        usb::log ("sequence of %d steps %s in %lu us", sequence.length, said (saved),
                   (unsigned long) (time_us_32() - t0));
     }
 }

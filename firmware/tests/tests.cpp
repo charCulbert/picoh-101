@@ -13,6 +13,7 @@
 #include "params.h"
 #include "gui_protocol.h"
 #include "websocket.h"
+#include "flash_ring.h"
 
 static int failures = 0;
 
@@ -417,6 +418,112 @@ static void sequencer_()
     CHECK (q.getMode() == Sequencer::Mode::stopped && q.getSequence().length == 100);
 }
 
+// Flash as NOR: erase sets a sector to 0xFF, programming only clears bits.
+struct FakeFlash
+{
+    static inline uint8_t bytes[8 * flashRing::sectorBytes];
+    static inline int erases = 0, programs = 0;
+    static const uint8_t* at (uint32_t offset) { return bytes + offset; }
+    static bool write (uint32_t offset, const uint8_t* page, bool eraseFirst)
+    {
+        if (eraseFirst)
+        {
+            std::memset (bytes + (offset & ~(flashRing::sectorBytes - 1)), 0xFF, flashRing::sectorBytes);
+            ++erases;
+        }
+        for (uint32_t i = 0; i < flashRing::pageBytes; ++i)
+            bytes[offset + i] &= page[i];
+        ++programs;
+        return true;
+    }
+    static bool erase (uint32_t offset)
+    {
+        std::memset (bytes + offset, 0xFF, flashRing::sectorBytes);
+        ++erases;
+        return true;
+    }
+};
+
+static void flashRing_()
+{
+    using Ring = flashRing::Ring<FakeFlash>;
+    std::memset (FakeFlash::bytes, 0x5A, sizeof FakeFlash::bytes); // never erased
+    const uint32_t offset = 2 * flashRing::sectorBytes;
+    auto ring = [&] { return Ring { offset, 4, { 'T', 'S', '0', '1' }, 1 }; };
+    Ring r = ring();
+    CHECK (r.load() == nullptr);
+    uint8_t data[101];
+    auto fill = [&] (int n) { for (int i = 0; i < 101; ++i) data[i] = uint8_t (n * 7 + i); };
+
+    // Round trip, and an unchanged save writes nothing.
+    fill (0);
+    CHECK (r.write (data, 101) == flashRing::Saved::written);
+    CHECK (FakeFlash::erases == 1 && FakeFlash::programs == 1);
+    CHECK (r.write (data, 101) == flashRing::Saved::unchanged);
+    CHECK (FakeFlash::programs == 1);
+    Ring again = ring();
+    CHECK (again.load() && std::memcmp (again.newest->data, data, 101) == 0);
+
+    // Many saves, round the ring several times, reloading as after a reboot: always the last one back,
+    // one erase each 16 saves, nothing written outside the ring.
+    FakeFlash::erases = FakeFlash::programs = 0;
+    for (int n = 1; n <= 1000; ++n)
+    {
+        fill (n);
+        CHECK (r.write (data, 101) == flashRing::Saved::written);
+        if (n % 97 == 0)
+        {
+            r = ring();
+            CHECK (r.load() && std::memcmp (r.newest->data, data, 101) == 0);
+        }
+    }
+    CHECK (FakeFlash::programs == 1000);
+    CHECK (FakeFlash::erases == 1000 / 16 + 1 || FakeFlash::erases == 1000 / 16);
+    CHECK (FakeFlash::bytes[offset - 1] == 0x5A && FakeFlash::bytes[offset + 4 * flashRing::sectorBytes] == 0x5A);
+    std::printf ("flash ring: 1000 saves, %d erases\n", FakeFlash::erases);
+
+    // A save cut off part way leaves the one before.
+    fill (1000);
+    const int cut = r.next;
+    fill (1001);
+    r.write (data, 101);
+    std::memset (FakeFlash::bytes + offset + cut * flashRing::pageBytes + 40, 0xFF, 100);
+    r = ring();
+    fill (1000);
+    CHECK (r.load() && std::memcmp (r.newest->data, data, 101) == 0);
+
+    // A page left dirty mid-sector (a save cut off by power loss) is skipped: the save moves on to the next sector.
+    r = ring();
+    r.load();
+    const int dirty = r.next;
+    if (dirty % flashRing::pagesPerSector != 0)
+    {
+        FakeFlash::bytes[offset + dirty * flashRing::pageBytes] = 0;
+        fill (2000);
+        CHECK (r.write (data, 101) == flashRing::Saved::written);
+        CHECK (r.next == (dirty / 16 + 1) * 16 % 64 + 1);
+        r = ring();
+        CHECK (r.load() && std::memcmp (r.newest->data, data, 101) == 0);
+    }
+
+    // After eraseAhead, the saves until the ring comes back to the newest's sector erase nothing, and the
+    // newest survives it.
+    r = ring();
+    r.load();
+    fill (3000);
+    r.write (data, 101);
+    r.load();
+    r.eraseAhead();
+    CHECK (r.load() && std::memcmp (r.newest->data, data, 101) == 0);
+    const int before = FakeFlash::erases, free = 48 + (16 - r.next % 16) % 16;
+    for (int i = 0; i < free; ++i)
+    {
+        fill (4000 + i);
+        CHECK (r.write (data, 101) == flashRing::Saved::written);
+    }
+    CHECK (FakeFlash::erases == before);
+}
+
 int main()
 {
     guiLines_();
@@ -429,6 +536,7 @@ int main()
     webSocket();
     synth();
     pages_();
+    flashRing_();
     std::printf (failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
     return failures ? 1 : 0;
 }

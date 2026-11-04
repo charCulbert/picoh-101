@@ -34,7 +34,7 @@ bool tracingBlock = false;
                                uint16_t ((begin) ? (from) : (until)));                                                 \
     } while (0)
 #include "event_scheduler.h"
-#include "sequence_flash.h"
+#include "flash_saves.h"
 #include "synth_host.h"
 
 alignas (8) static uint8_t traceBytes[trace::ringBytes];
@@ -59,6 +59,7 @@ std::atomic<uint32_t> sequencerPacked { 0 };
 picohDSP::Sequence toSave;
 std::atomic<bool> savePending { false };
 uint32_t savedVersion = 0;
+std::atomic<bool> rendering { false }; // core 1 is in renderLoop
 
 void publishSequencer()
 {
@@ -130,6 +131,8 @@ inline uint32_t toFrame (float l, float r)
     return toInt (l) << 16 | toInt (r);
 }
 
+[[noreturn]] void renderLoop (EventScheduler<SynthHost>& scheduler);
+
 void run()
 {
     // Flush denormals to zero on this core, so decaying filters and envelopes stay fast.
@@ -137,9 +140,8 @@ void run()
     asm volatile ("vmrs %0, fpscr" : "=r"(fpscr));
     asm volatile ("vmsr fpscr, %0" : : "r"(fpscr | (1u << 24)));
 
-    flash_safe_execute_core_init();
     synth.prepare (float (audio::sampleRate), audio::blockFrames);
-    if (picohDSP::Sequence stored; sequenceFlash::read (stored))
+    if (picohDSP::Sequence stored; flashSaves::readSequence (stored))
         synth.setSequence (stored);
     trace::ring.startCycleCounter (
         uint32_t (uint64_t (clock_get_hz (clk_sys)) * audio::blockFrames / audio::sampleRate));
@@ -147,9 +149,16 @@ void run()
     gpio_init (audio::busyPin);
     gpio_set_dir (audio::busyPin, GPIO_OUT);
     EventScheduler<SynthHost> scheduler (synth, audio::sampleRate, audio::blockFrames * 1000000u / audio::sampleRate);
-    auto pop = [] (Event& e) { return queue_try_remove (events, &e); };
     startI2s();
+    rendering.store (true, std::memory_order_release);
+    renderLoop (scheduler);
+}
 
+// Everything from here on runs from RAM and reads nothing in flash (tools/core1-in-ram.py), so flash can
+// be written while it plays.
+[[noreturn]] __attribute__ ((noinline)) void renderLoop (EventScheduler<SynthHost>& scheduler)
+{
+    auto pop = [] (Event& e) { return queue_try_remove (events, &e); };
     while (true)
     {
         while (filled)
@@ -189,6 +198,13 @@ void start (queue_t* eventQueue)
 {
     events = eventQueue;
     multicore_launch_core1 (run);
+    for (uint32_t t0 = time_us_32(); ! rendering.load (std::memory_order_acquire) && time_us_32() - t0 < 1000000;)
+        tight_loop_contents();
+}
+
+bool flashFree()
+{
+    return rendering.load (std::memory_order_acquire);
 }
 
 Sequencer sequencer()

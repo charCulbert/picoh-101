@@ -90,14 +90,28 @@ pico_enable_stdio_uart(synth 0)
 
 # ---- The synth runs from RAM -------------------------------------------------
 # The flash cache is 16 KB and shared with core 0; the synth's code alone is bigger, and from flash the
-# load was 46% with late blocks. So the SDK's own linker script, with Synth.cpp and synth_core.cpp added
+# load was 46% with late blocks. So the SDK's own linker script, with the synth and what it calls added
 # to what it already keeps out of flash (libgcc, libm, memcpy).
 
 file(READ ${PICO_SDK_PATH}/src/rp2_common/pico_crt0/rp2350/memmap_default.ld memmap)
-string(REPLACE "*libm.a:)" "*libm.a: *Synth.cpp.o *synth_core.cpp.o)" memmap "${memmap}")
+# Core 1's render loop must not touch flash at all, so a save can write flash while the synth plays;
+# tools/core1-in-ram.py fails the build if anything it reaches is left there.
+set(in_ram "*Synth.cpp.o *SynthParameters.cpp.o *synth_core.cpp.o *queue.c.o")
+foreach(o memcpy memmove memset)
+    string(APPEND in_ram " *libc.a:*${o}.o *libg.a:*${o}.o")
+endforeach()
+foreach(o double_aeabi_dcp.S double_conv_m33.S double_sci_m33.S double_math.c float_math.c float_sci_m33_vfp.S) # the SDK's float and double helpers
+    string(APPEND in_ram " *${o}.o")
+endforeach()
+string(REPLACE "*libm.a:)" "*libm.a: ${in_ram})" memmap "${memmap}")
+target_compile_definitions(synth PRIVATE PICO_FLASH_ASSUME_CORE1_SAFE=1) # saves pause core 0 only
 file(WRITE ${GEN}/memmap_picoh.ld "${memmap}")
 pico_set_linker_script(synth ${GEN}/memmap_picoh.ld)
 
+# Before the UF2 is made, so a failing build leaves none to flash.
+add_custom_command(TARGET synth POST_BUILD
+    COMMAND Python3::Interpreter ${CMAKE_CURRENT_LIST_DIR}/tools/core1-in-ram.py ${CMAKE_OBJDUMP} $<TARGET_FILE:synth>
+    VERBATIM)
 pico_add_extra_outputs(synth)
 
 # Flash: reboot the board into its bootloader (its serial port opened at 1200 baud), then load.
