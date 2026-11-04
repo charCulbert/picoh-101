@@ -13,11 +13,18 @@ namespace picohDSP
 {
 
 // One note: VCO, VCF, VCA. The ADSR sweeps the cutoff and is the VCA on ENV; on GATE the VCA
-// is the gate. The LFO is read once per render() call.
+// is the gate.
+//
+// The controls (glide, LFO, the modulation sums, the VCO's pitch and the filter's coefficients) are worked
+// out on a clock: every tickLength samples counted from prepare(), for the tickLength to come, however
+// render() calls split the samples. Notes, gates and the ADSR still move on their own sample; a new key's
+// pitch is set at once, its key tracking and glide wait for the next tick. After skip() the first render()
+// works them out at once.
 struct Voice
 {
     static constexpr float keyTrackPivot = 35.0f;      // the note key tracking leaves alone (B1)
     static constexpr float envelopeSemitones = 192.0f; // Env Amount 1 moves the cutoff this far
+    static constexpr int tickLength = 16;
 
     // What moves the pulse's width: the PULSE WIDTH slider alone, or the LFO or the ADSR by that much.
     enum class PwmSource
@@ -66,10 +73,19 @@ private:
     LFO lfo;
     Glide glide;
     const Settings* settings = nullptr;
-    float key = 60.0f; // the gliding key, this block
+    float key = 60.0f; // the gliding key, this tick
     Envelope envelope;
     Gate gate;
     Filter filter;
+
+    int sinceTick = 0;
+    bool late = true; // the controls are due before the next tick: after prepare() or skip()
+    float cutoffSemitones = 0.0f, halfSweepScale = 0.0f; // the cutoff with the ADSR at 0, and per ADSR unit, halved
+    float lfoWidth = 0.0f;                                 // the PWM on LFO
+
+    void control (int frames) noexcept;               // the controls, for the next frames samples
+    void renderRun (float* __restrict out, int frames) noexcept; // within a tick
+    void advanceClock (int frames) noexcept;
 };
 
 //=====================================================
@@ -86,6 +102,8 @@ inline void Voice::prepare (double sampleRate, size_t index) noexcept
     vco.prepare (sampleRate, index);
     lfo.prepare (sampleRate, static_cast<uint32_t> (index));
     glide.prepare (sampleRate);
+    sinceTick = 0;
+    late = true;
 }
 
 inline void Voice::start (int newKey, bool slide) noexcept
@@ -128,62 +146,99 @@ inline bool Voice::isActive() const noexcept
 
 inline void Voice::render (float* __restrict out, int frames) noexcept
 {
-    const Settings& s = *settings;
-    key = glide.next (frames);
-    vco.moveNote (key);
-    const float lfoValue = lfo.next (frames);
-    const float triangle = lfo.getTriangle();
-    vco.setModulation (lfoValue * s.lfoToPitchCents + triangle * s.wheelToPitchCents + s.bendCents);
-
-    vco.startBlock (frames);
-    PICOH_TRACE_POINT (voiceStarted, frames);
-    const float cutoffSemitones = (key - keyTrackPivot) * s.keyTrack + lfoValue * s.lfoToCutoffSemitones
-                                 + triangle * s.wheelToCutoffSemitones + s.bendCutoffSemitones;
-
-    // Per chunk: the ADSR and the gate first (ENV can move the pulse's width), then the VCO, then the filter
-    // and VCA. In one loop they don't fit the registers. The ADSR and the gate both run, so switching the
-    // VCA mid-note doesn't jump.
-    const float sweepScale = s.envAmount * envelopeSemitones;
-    constexpr int chunk = 32, holdLength = 16;
-    float sound[chunk], adsr[chunk], open[chunk], lfoWidth[chunk];
-    for (int start = 0; start < frames; start += chunk)
+    for (int done = 0; done < frames;)
     {
-        const int count = std::min (chunk, frames - start);
-        for (int i = 0; i < count; ++i)
-        {
-            adsr[i] = envelope.next();
-            open[i] = gate.next();
-        }
-        const float* widthMod = nullptr;
-        if (s.pwmSource == PwmSource::env)
-            widthMod = adsr;
-        else if (s.pwmSource == PwmSource::lfo)
-        {
-            std::fill (lfoWidth, lfoWidth + count, 0.5f * (lfoValue + 1.0f));
-            widthMod = lfoWidth;
-        }
-        vco.render (sound, count, widthMod);
-        PICOH_TRACE_POINT (oscillatorsDone, start);
-
-        // The cutoff is held for holdLength samples at the ADSR's middle value (Filter::hold).
-        for (int from = 0; from < count; from += holdLength)
-        {
-            const int length = std::min (holdLength, count - from);
-            const float middle = 0.5f * (adsr[from + (length - 1) / 2] + adsr[from + length / 2]);
-            filter.hold (middle * sweepScale + cutoffSemitones, length);
-            const float* level = s.vcaGate ? open : adsr;
-            for (int i = from; i < from + length; ++i)
-                out[start + i] += filter.process (sound[i]) * level[i];
-        }
-        PICOH_TRACE_POINT (filterDone, start);
+        if (sinceTick == 0)
+            lfo.tick (tickLength);
+        if (sinceTick == 0 || late)
+            control (tickLength - sinceTick);
+        const int length = std::min (frames - done, tickLength - sinceTick);
+        renderRun (out + done, length);
+        advanceClock (length);
+        done += length;
     }
 }
 
 inline void Voice::skip (int frames) noexcept
 {
-    lfo.next (frames); // idle, it still runs
+    for (int done = 0; done < frames;) // idle, the LFO still runs
+    {
+        if (sinceTick == 0)
+            lfo.tick (tickLength);
+        const int length = std::min (frames - done, tickLength - sinceTick);
+        advanceClock (length);
+        done += length;
+    }
     vco.skip (frames);
     filter.reset();
+    late = true;
+}
+
+inline void Voice::advanceClock (int frames) noexcept
+{
+    lfo.advance (frames);
+    sinceTick = (sinceTick + frames) % tickLength;
+}
+
+// The filter's cutoff is held over the frames at the ADSR's middle value (Filter::hold), read ahead on a
+// copy so the ADSR itself stays on this sample.
+inline void Voice::control (int frames) noexcept
+{
+    const Settings& s = *settings;
+    key = glide.next (frames);
+    vco.moveNote (key);
+    const float lfoValue = lfo.getValue();
+    const float triangle = lfo.getTriangle();
+    vco.setModulation (lfoValue * s.lfoToPitchCents + triangle * s.wheelToPitchCents + s.bendCents);
+    vco.startBlock (frames);
+    cutoffSemitones = (key - keyTrackPivot) * s.keyTrack + lfoValue * s.lfoToCutoffSemitones
+                    + triangle * s.wheelToCutoffSemitones + s.bendCutoffSemitones;
+    halfSweepScale = s.envAmount * envelopeSemitones * 0.5f;
+    lfoWidth = 0.5f * (lfoValue + 1.0f);
+
+    Envelope ahead = envelope;
+    const int below = (frames - 1) / 2, above = frames / 2;
+    float twiceMiddle = 0.0f;
+    for (int i = 0; i <= above; ++i)
+    {
+        const auto level = ahead.next();
+        if (i == below)
+            twiceMiddle = float (level);
+        if (i == above)
+            twiceMiddle += float (level);
+    }
+    filter.hold (twiceMiddle * halfSweepScale + cutoffSemitones, frames);
+    late = false;
+    PICOH_TRACE_POINT (voiceStarted, frames);
+}
+
+// The ADSR and the gate first (ENV can move the pulse's width), then the VCO, then the filter and VCA. In one
+// loop they don't fit the registers. The ADSR and the gate both run, so switching the VCA mid-note doesn't
+// jump.
+inline void Voice::renderRun (float* __restrict out, int frames) noexcept
+{
+    const Settings& s = *settings;
+    float sound[tickLength], adsr[tickLength], open[tickLength], width[tickLength];
+    for (int i = 0; i < frames; ++i)
+    {
+        adsr[i] = envelope.next();
+        open[i] = gate.next();
+    }
+    const float* widthMod = nullptr;
+    if (s.pwmSource == PwmSource::env)
+        widthMod = adsr;
+    else if (s.pwmSource == PwmSource::lfo)
+    {
+        std::fill (width, width + frames, lfoWidth);
+        widthMod = width;
+    }
+    vco.render (sound, frames, widthMod);
+    PICOH_TRACE_POINT (oscillatorsDone, frames);
+
+    const float* level = s.vcaGate ? open : adsr;
+    for (int i = 0; i < frames; ++i)
+        out[i] += filter.process (sound[i]) * level[i];
+    PICOH_TRACE_POINT (filterDone, frames);
 }
 
 } // namespace picohDSP

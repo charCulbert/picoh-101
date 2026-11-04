@@ -80,7 +80,6 @@ private:
     void setLevel (picohDSP::Vco::Source, float level) noexcept; // a mixer fader
     // A voice peaks at Pulse + Saw (2), and resonance can add more: this doesn't prevent clipping.
     static constexpr float outputLevel = 0.25f;
-    static constexpr int pieceFrames = 64; // render's longest piece: the glide steps once a piece
 
     picohDSP::MonoKeys keys;
     picohDSP::Voice voice;

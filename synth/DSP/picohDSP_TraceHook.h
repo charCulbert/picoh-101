@@ -10,9 +10,9 @@
 //   synthBegin       Synth::render starts; arg: frames
 //   monoCleared      a piece's mono buffer is cleared; arg: the piece's frames
 //   voiceBegin       the voice is next; arg: 0
-//   voiceStarted     the voice's VCO has started the block; arg: frames
-//   oscillatorsDone  a chunk's oscillator pass is done; arg: the chunk's first sample
-//   filterDone       the chunk's filter and envelope pass is done; arg: its first sample
+//   voiceStarted     the voice's controls are worked out (a tick); arg: their frames
+//   oscillatorsDone  a run's oscillator pass is done (a run ends at a tick); arg: its frames
+//   filterDone       the run's filter and VCA pass is done; arg: its frames
 //   voiceEnd         the voice rendered; arg: 0
 //   voiceSkipped     the voice was idle and only skipped the block; arg: 0
 //   outputCopied     a piece is scaled into left and right; arg: the piece's frames

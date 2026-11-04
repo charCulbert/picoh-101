@@ -126,11 +126,10 @@ void Synth::render (float* left, float* right, int frames) noexcept
 {
     PICOH_TRACE_POINT (synthBegin, frames);
 
-    // In pieces of pieceFrames at most (and no longer than the buffer prepare() made), split where the grace
-    // ends.
+    // In pieces no longer than the buffer prepare() made, split where the grace ends and at the LFO's edges.
     for (int done = 0; done < frames;)
     {
-        int count = std::min ({ frames - done, static_cast<int> (mono.size()), pieceFrames });
+        int count = std::min (frames - done, static_cast<int> (mono.size()));
         if (const int grace = keys.samplesToGraceEnd(); grace > 0)
             count = std::min (count, grace);
         const bool lfoGates = keys.getTrigger() == picohDSP::MonoKeys::Trigger::lfo && (keys.isGateOpen() || sequenceGate);
