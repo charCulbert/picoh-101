@@ -14,7 +14,7 @@ static_assert (params::count * sizeof (float) <= sizeof (flashRing::Page::data))
 
 inline bool kept (int id)
 {
-    return id != P_VOLUME && id != P_TRANSPOSE && id != P_ARPEGGIO && id != P_HOLD;
+    return id != P_VOLUME && id != P_ARPEGGIO && id != P_HOLD;
 }
 
 template <class Flash>

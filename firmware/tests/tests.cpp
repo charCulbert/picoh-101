@@ -609,7 +609,7 @@ static void patchMemory_()
     CHECK (! m.load (3, loaded));
     const int cutoff = idOf ("vcf freq"), volume = idOf ("volume"), hold = idOf ("hold");
     CHECK (! patches::kept (volume) && ! patches::kept (hold) && ! patches::kept (idOf ("arpeggio"))
-           && ! patches::kept (idOf ("transpose")) && patches::kept (cutoff));
+           && patches::kept (idOf ("transpose")) && patches::kept (cutoff));
 
     panel[cutoff] = 555.0f;
     panel[volume] = 0.1f;
