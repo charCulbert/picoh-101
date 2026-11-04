@@ -1,10 +1,11 @@
 // What the Pico keeps in flash, at the top: the sequence in the last 4 sectors (64 saves to a round, so a
-// sector is erased once every 16 saves), the panel's settings in the 16 below (once every 256). Core 0
-// writes, pausing only itself: core 1 never reads flash once it renders (tools/core1-in-ram.py).
+// sector is erased once every 16 saves), the patches in the 264 KB below (patches.h). Core 0 writes,
+// pausing only itself: core 1 never reads flash once it renders (tools/core1-in-ram.py).
 #pragma once
 #include "DSP/picohDSP_Sequencer.h"
 #include "board.h"
 #include "flash_ring.h"
+#include "patches.h"
 #include "hardware/flash.h"
 #include "pico/flash.h"
 
@@ -51,13 +52,12 @@ struct PicoFlash
 };
 using Ring = flashRing::Ring<PicoFlash>;
 
-constexpr int sequenceSectors = 4, settingsSectors = 16;
+constexpr int sequenceSectors = 4;
 constexpr uint32_t sequenceOffset = PICO_FLASH_SIZE_BYTES - sequenceSectors * FLASH_SECTOR_SIZE;
-constexpr uint32_t settingsOffset = sequenceOffset - settingsSectors * FLASH_SECTOR_SIZE;
-constexpr int maxSettings = sizeof (flashRing::Page::data) / sizeof (float);
+constexpr uint32_t patchesOffset = sequenceOffset - patches::bytes;
 
 inline Ring sequences { sequenceOffset, sequenceSectors, { 'S', 'Q', '0', '2' }, 1 };
-inline Ring settings { settingsOffset, settingsSectors, { 'S', 'T', '0', '1' }, sizeof (float) };
+inline const patches::Memory<PicoFlash> patchMemory { patchesOffset };
 
 // The sequence saved last.
 inline bool readSequence (picohDSP::Sequence& sequence)

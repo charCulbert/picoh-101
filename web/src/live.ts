@@ -86,6 +86,7 @@ export interface LiveHandlers {
     wheel(kind: "b" | "m", value: number): void;
     sequencer?(mode: string, position: number, length: number): void;
     keyTranspose?(semitones: number): void;
+    patch?(armed: string, key: number): void;
     key?(note: number, down: boolean): void;
     keys?(down: Set<number>): void; // every key down, so stale ones go out
     load(average: number, busiest: number, late: number): void;
@@ -162,6 +163,7 @@ export class LiveView {
             const [kind, a, b, c] = String(e.data).split(" ");
             if (kind === "s") return this.handlers.sequencer?.(a, Number(b), Number(c));
             if (kind === "t") return this.handlers.keyTranspose?.(Number(a));
+            if (kind === "p") return this.handlers.patch?.(a, Number(b));
             if (kind === "v") this.handlers.value(Number(a), Number(b));
             else if (kind === "b" || kind === "m") this.handlers.wheel(kind, Number(a));
             else if (kind === "k") this.handlers.key?.(Number(a), b === "1");
@@ -188,4 +190,5 @@ export class LiveView {
     sequencer(button: "load" | "play" | "rest"): void { this.send(`s ${button}`); }
     legato(down: boolean): void { this.send(`l ${down ? 1 : 0}`); }
     keyTranspose(down: boolean): void { this.send(`t ${down ? 1 : 0}`); }
+    patch(button: "load" | "store"): void { this.send(`p ${button}`); }
 }

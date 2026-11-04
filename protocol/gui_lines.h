@@ -13,6 +13,8 @@
 //   s <load|play|rest>      the sequencer's buttons (REST: KEY TRANSPOSE's button while loading)
 //   l <1|0>                 LEGATO (HOLD's button while loading) down or up
 //   t <1|0>                 KEY TRANSPOSE down or up
+//   p <load|store>          (Pico) the patch buttons: arms one, or disarms it if armed. The next key from
+//                           41 to 72 (F to C), from any input, loads or stores that key's patch
 //   ping                    (USB MIDI) still here; no answer. A SysEx GUI silent for 5 s is gone.
 //
 // Synth to GUI:
@@ -23,6 +25,8 @@
 //   b <-1 to 1>, m <0 to 1> the wheels
 //   s <stopped|loading|playing> <position> <length>   the sequencer, when any of them changes
 //   t <semitones>           KEY TRANSPOSE (0: off, its light out)
+//   p <off|load|store> <key>   (Pico) the patch button armed, if any, and the key of the patch last
+//                           loaded or stored (0: none), when either changes
 //   load <avg%> <busiest%> <underruns>   (Pico) once a second
 //   # <text>                (USB serial) a log line for people; GUIs ignore it
 #pragma once
@@ -49,6 +53,7 @@ struct Line
         sequencer, // id: 0 load, 1 play, 2 rest
         legato,    // value: 1 down, 0 up
         keyTranspose,
+        patch, // id: 0 load, 1 store
         ping
     };
     Kind kind = Kind::unknown;
@@ -119,6 +124,13 @@ inline Line parse (const char* text)
                     }
                 break;
             }
+            case 'p':
+                if (std::strcmp (text + 2, "load") == 0 || std::strcmp (text + 2, "store") == 0)
+                {
+                    line.kind = Line::Kind::patch;
+                    line.id = text[2] == 's';
+                }
+                break;
             case 'l':
             case 't':
                 if ((text[2] == '0' || text[2] == '1') && text[3] == 0)
@@ -158,6 +170,13 @@ inline void sequencerLine (char* out, size_t size, int mode, int position, int l
 inline void keyTransposeLine (char* out, size_t size, int semitones)
 {
     std::snprintf (out, size, "t %d", semitones);
+}
+
+// armed: 0 off, 1 load, 2 store.
+inline void patchLine (char* out, size_t size, int armed, int key)
+{
+    static constexpr const char* states[] = { "off", "load", "store" };
+    std::snprintf (out, size, "p %s %d", states[armed < 0 || armed > 2 ? 0 : armed], key);
 }
 
 // kind: 'b' (pitch) or 'm' (mod).

@@ -44,6 +44,7 @@ struct Guis
             case Kind::sequencer: control->sequencerButton (line.id, from.port); break;
             case Kind::legato: control->heldButton (EVENT_LEGATO, line.value > 0, from.port); break;
             case Kind::keyTranspose: control->heldButton (EVENT_KEY_TRANSPOSE, line.value > 0, from.port); break;
+            case Kind::patch: control->patchButton (line.id ? Control::armedStore : Control::armedLoad); break;
             default: break; // gestures are the plugin's; hello and ping are the transport's
         }
         sender = nullptr;
@@ -57,6 +58,12 @@ struct Guis
                 control->note (uint8_t (key), 0, gui.port);
         for (uint32_t& word : gui.held)
             word = 0;
+    }
+
+    void patchLine (char* line, size_t size) const
+    {
+        guiLines::patchLine (line, size, control->armed,
+                             control->patchSlot < 0 ? 0 : Control::firstPatchKey + control->patchSlot);
     }
 
     template <typename Send>
@@ -78,6 +85,8 @@ struct Guis
         guiLines::sequencerLine (line, sizeof line, s.mode, s.position, s.length);
         send (line);
         guiLines::keyTransposeLine (line, sizeof line, s.keyTranspose);
+        send (line);
+        patchLine (line, sizeof line);
         send (line);
     }
 };

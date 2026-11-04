@@ -14,6 +14,10 @@ struct Control
     void (*wheelMoved) (EventType, float value, EventPort) = nullptr;  // so every GUI's wheels follow
     void (*keyChanged) (int key, bool down, EventPort) = nullptr;      // so every GUI lights the keys
     uint32_t (*nowUs)() = nullptr;
+    // The patch buttons: the slot a key picks is loaded (false: empty) or stored; patchChanged tells the GUIs.
+    bool (*loadPatch) (int slot) = nullptr;
+    bool (*storePatch) (int slot) = nullptr;
+    void (*patchChanged)() = nullptr;
 
     float values[params::count]; // in the list's units
     uint32_t keysDown[4] = {};   // from any input, one bit each
@@ -53,9 +57,40 @@ struct Control
         }
     }
 
-    // velocity 0-65535; 0 is note off.
+    // One slot per key of the panel's keyboard, F to C.
+    static constexpr int firstPatchKey = 41, patchSlots = 32;
+    enum Armed
+    {
+        unarmed,
+        armedLoad,
+        armedStore
+    };
+    Armed armed = unarmed;
+    int patchSlot = -1; // loaded or stored last
+
+    void patchButton (Armed button)
+    {
+        armed = armed == button ? unarmed : button;
+        if (patchChanged)
+            patchChanged();
+    }
+
+    // velocity 0-65535; 0 is note off. While a patch button is armed, the next key in range picks the slot:
+    // a load plays the key as usual, a store doesn't.
     void note (uint8_t key, uint16_t velocity, EventPort port, uint8_t channel = 0)
     {
+        if (armed != unarmed && velocity && key >= firstPatchKey && key < firstPatchKey + patchSlots)
+        {
+            const Armed button = armed;
+            const int slot = key - firstPatchKey;
+            armed = unarmed;
+            if (button == armedLoad ? loadPatch && loadPatch (slot) : storePatch && storePatch (slot))
+                patchSlot = slot;
+            if (patchChanged)
+                patchChanged();
+            if (button == armedStore)
+                return;
+        }
         Event e = make (velocity ? EVENT_NOTE_ON : EVENT_NOTE_OFF, port);
         e.note.channel = channel;
         e.note.key = key & 0x7F;

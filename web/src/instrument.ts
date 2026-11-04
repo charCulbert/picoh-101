@@ -22,6 +22,7 @@ export interface PanelLink {
     sequencer(button: "load" | "play" | "rest"): void;
     legato(down: boolean): void;
     keyTranspose(down: boolean): void;
+    patch(button: "load" | "store"): void;
     noteOn(note: number): void;
     noteOff(note: number): void;
     releaseNotes(): void;
@@ -34,6 +35,7 @@ export interface Panel {
     wheel(kind: "b" | "m", value: number): void;
     sequencer(mode: string, position: number, length: number): void;
     keyTranspose(semitones: number): void;
+    patch(armed: string, key: number): void; // the button armed ("off", "load", "store"), the patch's key (0: none)
     key(note: number, down: boolean): void; // a key sounding or not, from anywhere: lit on the keyboard
     keys(down: Set<number>): void;          // exactly these lit (keys held here stay lit)
     clearKeys(): void;
@@ -131,6 +133,7 @@ const markup = `<div class="sh">
 <div class="grp grp-seq"><div class="row seq"></div><span class="bracket">SEQUENCER</span></div>
 <div class="grp grp-arp"><div class="row arp"></div><span class="bracket">ARPEGGIO</span></div>
 <div class="grp grp-hold"><div class="row hold"></div></div>
+<div class="grp grp-patch"><div class="row patch"></div><span class="bracket">PATCH</span></div>
 <span class="reach"></span>
 <span class="logo">PICOH-101</span>
 </div>
@@ -394,6 +397,14 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
     });
     q(".hold").append(keyTranspose.box);
 
+    // Patch memory, one per key: arm LOAD or STORE (again: cancel), then press a key.
+    let patchArmed = "off", patchKey = 0;
+    const patchButtons = (["load", "store"] as const).map((button) => {
+        const b = holdButton(button.toUpperCase(), "", (down) => { if (down) live.patch(button); });
+        q(".patch").append(b.box);
+        return b;
+    });
+
     // The keys: 32, F to C. Every way a key can be let go sends its note off; if the page goes
     // before it can, the synth lets go itself.
     const piano = q<CompostPiano>(".keys");
@@ -406,7 +417,11 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
     addEventListener("blur", letGo);
     // Upright phone: fewer, wider keys (two octaves from F); otherwise the panel's 32.
     const upright = matchMedia("(max-width: 700px) and (min-height: 521px)");
-    const fitKeys = () => piano.setAttribute("note-count", upright.matches ? "25" : "32");
+    const markPatch = () => {
+        for (const el of piano.shadowRoot?.querySelectorAll<HTMLElement>("[data-note]") ?? [])
+            el.part.toggle("patch", Number(el.dataset.note) === patchKey);
+    };
+    const fitKeys = () => { piano.setAttribute("note-count", upright.matches ? "25" : "32"); markPatch(); };
     upright.addEventListener("change", fitKeys);
     fitKeys();
     const keysSide = q(".keys-side");
@@ -437,6 +452,15 @@ export function createInstrument(root: HTMLElement, params: Parameter[], live: P
         keyTranspose(semitones) {
             keyTranspose.light(semitones !== 0);
             if (semitones) live.say(`KEY TRANSPOSE  ${semitones > 0 ? "+" : ""}${semitones}`);
+        },
+        patch(armed, key) {
+            patchButtons[0].light(armed === "load");
+            patchButtons[1].light(armed === "store");
+            if (armed !== patchArmed && armed !== "off") live.say(`${armed.toUpperCase()}: press a key for the patch`);
+            else if (key !== patchKey && key) live.say(`Patch ${key - 40}`);
+            patchArmed = armed;
+            patchKey = key;
+            markPatch();
         },
         key(note, down) { piano.handleMIDIMessage([down ? 0x90 : 0x80, note, down ? 100 : 0]); },
         keys(down) {

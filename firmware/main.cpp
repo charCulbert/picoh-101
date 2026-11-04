@@ -29,33 +29,6 @@ void toGuis (const char* line, const Gui* skip)
         web::sendText (line, skip);
 }
 
-// The panel's settings, saved 2 s after the last change. ARPEGGIO and HOLD are playing, not settings: on
-// the SH-101 they're off at power on.
-constexpr uint32_t settleUs = 2000000;
-bool settingsChanged = false;
-uint32_t lastChangeUs = 0;
-
-bool isSetting (int id)
-{
-    return id != P_ARPEGGIO && id != P_HOLD;
-}
-
-void loadSettings()
-{
-    const flashRing::Page* saved = flashSaves::settings.load();
-    flashSaves::sequences.load();
-    flashSaves::settings.eraseAhead();
-    flashSaves::sequences.eraseAhead();
-    if (! saved)
-        return;
-    float values[flashSaves::maxSettings];
-    std::memcpy (values, saved->data, saved->count * sizeof (float));
-    for (int id = 0; id < saved->count && id < params::count; ++id)
-        if (isSetting (id))
-            control.setValue (id, values[id], EVENT_PORT_USB);
-    settingsChanged = false;
-}
-
 const char* said (flashRing::Saved saved)
 {
     return saved == flashRing::Saved::written     ? "saved"
@@ -63,28 +36,71 @@ const char* said (flashRing::Saved saved)
                                                   : "NOT saved";
 }
 
-void saveSettings()
+void patchChanged()
 {
-    if (! settingsChanged || time_us_32() - lastChangeUs < settleUs)
-        return;
-    settingsChanged = false;
+    char line[24];
+    guis.patchLine (line, sizeof line);
+    toGuis (line, nullptr);
+}
+
+// The slot loaded or stored last, for power on: written from the control loop, after the key's note.
+int slotToRemember = -1;
+
+bool loadPatch (int slot)
+{
+    float values[params::count];
+    std::memcpy (values, control.values, sizeof values);
+    if (! flashSaves::patchMemory.load (slot, values))
+    {
+        usb::log ("patch %d empty", slot + 1);
+        return false;
+    }
+    const Gui* sender = guis.sender;
+    guis.sender = nullptr; // the GUI whose key loaded it shows it too
+    for (int id = 0; id < params::count; ++id)
+        if (values[id] != control.values[id])
+            control.setValue (id, values[id], EVENT_PORT_USB);
+    guis.sender = sender;
+    slotToRemember = slot;
+    usb::log ("patch %d loaded", slot + 1);
+    return true;
+}
+
+bool storePatch (int slot)
+{
     const uint32_t t0 = time_us_32();
-    float values[flashSaves::maxSettings];
-    const int count = params::count < flashSaves::maxSettings ? params::count : flashSaves::maxSettings;
-    for (int id = 0; id < count; ++id)
-        values[id] = isSetting (id) ? control.values[id] : 0.0f;
-    const auto saved = flashSaves::settings.write (values, count);
-    usb::log ("settings %s in %lu us", said (saved), (unsigned long) (time_us_32() - t0));
+    const auto saved = flashSaves::patchMemory.store (slot, control.values);
+    usb::log ("patch %d %s in %lu us", slot + 1, said (saved), (unsigned long) (time_us_32() - t0));
+    if (saved == flashRing::Saved::failed)
+        return false;
+    slotToRemember = slot;
+    return true;
+}
+
+void rememberSlot()
+{
+    if (slotToRemember < 0)
+        return;
+    const auto saved = flashSaves::patchMemory.remember (slotToRemember);
+    if (saved == flashRing::Saved::failed)
+        usb::log ("last patch NOT saved");
+    slotToRemember = -1;
+}
+
+// The sequence, and the patch loaded or stored last; the playing controls at their defaults.
+void loadSaved()
+{
+    flashSaves::sequences.load();
+    flashSaves::sequences.eraseAhead();
+    const int slot = flashSaves::patchMemory.lastSlot();
+    if (slot >= 0 && loadPatch (slot))
+        control.patchSlot = slot;
+    slotToRemember = -1;
 }
 
 // The other GUIs follow; the one that moved it already shows it.
 void knobMoved (int id, float value, EventPort)
 {
-    if (isSetting (id))
-    {
-        settingsChanged = true;
-        lastChangeUs = time_us_32();
-    }
     char line[40];
     guiLines::valueLine (line, sizeof line, id, value);
     toGuis (line, guis.sender);
@@ -165,12 +181,15 @@ int main()
     control.wheelMoved = wheelMoved;
     control.keyChanged = keyChanged;
     control.nowUs = nowUs;
+    control.loadPatch = loadPatch;
+    control.storePatch = storePatch;
+    control.patchChanged = patchChanged;
 
     guis.control = &control;
     guis.broadcast = toGuis;
     usb::start (guis);
     audio::start (&events);
-    loadSettings();
+    loadSaved();
     din::start();
 #if HAVE_WEB
     haveWeb = web::start (guis);
@@ -194,7 +213,7 @@ int main()
         trace::core0.span (trace::webPoll, t2, t3, 0, trace::ring);
         reportLoad();
         followSequencer();
-        saveSettings();
+        rememberSlot();
         trace::core0.span (trace::loadReport, t3, time_us_32(), 0, trace::ring);
     }
 }

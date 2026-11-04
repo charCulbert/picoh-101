@@ -14,6 +14,7 @@
 #include "gui_protocol.h"
 #include "websocket.h"
 #include "flash_ring.h"
+#include "patches.h"
 
 static int failures = 0;
 
@@ -323,6 +324,10 @@ static void guiLines_()
     CHECK (guiLines::parse ("s stop").kind == Kind::unknown);
     CHECK (guiLines::parse ("l 1").kind == Kind::legato && guiLines::parse ("t 0").kind == Kind::keyTranspose);
     CHECK (guiLines::parse ("t 0").value == 0.0f && guiLines::parse ("t 2").kind == Kind::unknown);
+    CHECK (guiLines::parse ("p load").kind == Kind::patch && guiLines::parse ("p load").id == 0);
+    CHECK (guiLines::parse ("p store").kind == Kind::patch && guiLines::parse ("p store").id == 1);
+    for (const char* bad : { "p", "p ", "p off", "p loads", "p store 3" })
+        CHECK (guiLines::parse (bad).kind == Kind::unknown);
     for (const char* bad : { "", "v", "v x 1", "v -1 2", "v 2147483648 1", "v 70000 1", "v 12 nan", "n 60 nan", "b inf",
                              "m nan", "bogus", "load 1 2 3", "# log" })
         CHECK (guiLines::parse (bad).kind == Kind::unknown);
@@ -334,6 +339,69 @@ static void guiLines_()
     CHECK (std::string (line) == "keys 00000000100000000000000080000000");
     guiLines::valueLine (line, sizeof line, 12, 1234.5f);
     CHECK (std::string (line) == "v 12 1234.5");
+    guiLines::patchLine (line, sizeof line, 2, 41);
+    CHECK (std::string (line) == "p store 41");
+    guiLines::patchLine (line, sizeof line, 0, 0);
+    CHECK (std::string (line) == "p off 0");
+}
+
+// LOAD and STORE: armed by their button (again: disarmed), the next key from 41 to 72, from any input,
+// picks the slot. A load plays the key, a store doesn't; keys outside leave it armed.
+static std::vector<std::pair<char, int>> patchCalls;
+static int patchTold = 0;
+static void patchButtons_()
+{
+    static Guis guis;
+    static Control c;
+    sent.clear();
+    c.send = [] (const Event& x) { sent.push_back (x); };
+    c.loadPatch = [] (int slot)
+    {
+        patchCalls.push_back ({ 'l', slot });
+        return slot != 7; // empty
+    };
+    c.storePatch = [] (int slot)
+    {
+        patchCalls.push_back ({ 's', slot });
+        return true;
+    };
+    c.patchChanged = [] { ++patchTold; };
+    guis.control = &c;
+    Gui web { EVENT_PORT_WEB };
+
+    guis.receive (web, "p store");
+    CHECK (c.armed == Control::armedStore && patchTold == 1);
+    c.note (40, 30000, EVENT_PORT_DIN); // below the keyboard: plays, still armed
+    CHECK (sent.size() == 1 && sent[0].type == EVENT_NOTE_ON && c.armed == Control::armedStore);
+    c.note (40, 0, EVENT_PORT_DIN);
+    c.note (45, 30000, EVENT_PORT_DIN);
+    CHECK (patchCalls.size() == 1 && patchCalls[0] == std::make_pair ('s', 4));
+    CHECK (sent.size() == 2 && c.armed == Control::unarmed && c.patchSlot == 4 && ! c.isDown (45));
+
+    guis.receive (web, "p load");
+    guis.receive (web, "p load"); // cancelled
+    CHECK (c.armed == Control::unarmed && patchTold == 4);
+    c.note (50, 30000, EVENT_PORT_USB);
+    CHECK (patchCalls.size() == 1 && sent.back().type == EVENT_NOTE_ON);
+
+    guis.receive (web, "p store");
+    guis.receive (web, "p load"); // the other button takes over
+    CHECK (c.armed == Control::armedLoad);
+    guis.receive (web, "n 48 1"); // slot 7, empty: nothing loaded, disarmed, plays
+    CHECK (patchCalls.back() == std::make_pair ('l', 7) && c.patchSlot == 4 && c.armed == Control::unarmed);
+    CHECK (sent.back().type == EVENT_NOTE_ON && sent.back().note.key == 48);
+
+    guis.receive (web, "p load");
+    c.note (72, 30000, EVENT_PORT_DIN);
+    CHECK (patchCalls.back() == std::make_pair ('l', 31) && c.patchSlot == 31);
+    CHECK (sent.back().type == EVENT_NOTE_ON && sent.back().note.key == 72);
+    c.note (72, 30000, EVENT_PORT_DIN); // disarmed: just a key
+    CHECK (patchCalls.size() == 3);
+
+    guis.receive (web, "p store");
+    std::string state;
+    guis.sendState ([&] (const char* text) { if (text[0] == 'p') state = text; });
+    CHECK (state == "p store 72");
 }
 
 // The chord in pitch order; U&D turns at the ends without repeating them; HOLD keeps the chord until a
@@ -421,8 +489,9 @@ static void sequencer_()
 // Flash as NOR: erase sets a sector to 0xFF, programming only clears bits.
 struct FakeFlash
 {
-    static inline uint8_t bytes[8 * flashRing::sectorBytes];
+    static inline uint8_t bytes[72 * flashRing::sectorBytes];
     static inline int erases = 0, programs = 0;
+    static inline bool cutAfterErase = false; // power lost between the erase and the page
     static const uint8_t* at (uint32_t offset) { return bytes + offset; }
     static bool write (uint32_t offset, const uint8_t* page, bool eraseFirst)
     {
@@ -431,6 +500,8 @@ struct FakeFlash
             std::memset (bytes + (offset & ~(flashRing::sectorBytes - 1)), 0xFF, flashRing::sectorBytes);
             ++erases;
         }
+        if (cutAfterErase)
+            return false;
         for (uint32_t i = 0; i < flashRing::pageBytes; ++i)
             bytes[offset + i] &= page[i];
         ++programs;
@@ -524,6 +595,72 @@ static void flashRing_()
     CHECK (FakeFlash::erases == before);
 }
 
+// The patches: round trip of the kept values only, each slot on its own, a store cut off by power loss
+// leaving the version before, many stores to one slot round its ring, and the slot last used.
+static void patchMemory_()
+{
+    std::memset (FakeFlash::bytes, 0x5A, sizeof FakeFlash::bytes); // never erased
+    const uint32_t offset = 4 * flashRing::sectorBytes;
+    const patches::Memory<FakeFlash> m { offset };
+    float panel[params::count], loaded[params::count];
+    for (int id = 0; id < params::count; ++id)
+        panel[id] = params::table[id].initial;
+    CHECK (m.lastSlot() == -1);
+    CHECK (! m.load (3, loaded));
+    const int cutoff = idOf ("vcf freq"), volume = idOf ("volume"), hold = idOf ("hold");
+    CHECK (! patches::kept (volume) && ! patches::kept (hold) && ! patches::kept (idOf ("arpeggio"))
+           && ! patches::kept (idOf ("transpose")) && patches::kept (cutoff));
+
+    panel[cutoff] = 555.0f;
+    panel[volume] = 0.1f;
+    CHECK (m.store (3, panel) == flashRing::Saved::written);
+    CHECK (m.store (3, panel) == flashRing::Saved::unchanged);
+    panel[cutoff] = 666.0f;
+    CHECK (m.store (4, panel) == flashRing::Saved::written);
+    std::memcpy (loaded, panel, sizeof loaded);
+    loaded[cutoff] = 0.0f;
+    loaded[volume] = 0.9f;
+    CHECK (m.load (3, loaded) && loaded[cutoff] == 555.0f && loaded[volume] == 0.9f);
+    CHECK (m.load (4, loaded) && loaded[cutoff] == 666.0f);
+    CHECK (! m.load (5, loaded));
+    CHECK (m.remember (3) == flashRing::Saved::written && m.lastSlot() == 3);
+    CHECK (m.remember (3) == flashRing::Saved::unchanged);
+    CHECK (m.remember (31) == flashRing::Saved::written && m.lastSlot() == 31);
+
+    // Cut off mid-page, and between the erase at a wrap and its page: the version before stays.
+    auto storeCut = [&] (float value, bool afterErase)
+    {
+        panel[cutoff] = value;
+        auto ring = m.slot (3);
+        ring.load();
+        const uint32_t page = ring.at (ring.next);
+        FakeFlash::cutAfterErase = afterErase;
+        m.store (3, panel);
+        FakeFlash::cutAfterErase = false;
+        if (! afterErase)
+            std::memset (FakeFlash::bytes + page + 40, 0xFF, 100);
+    };
+    int cuts = 0;
+    for (int n = 0; n < 70; ++n)
+    {
+        panel[cutoff] = 1000.0f + float (n);
+        CHECK (m.store (3, panel) == flashRing::Saved::written);
+        CHECK (m.load (3, loaded) && loaded[cutoff] == 1000.0f + float (n));
+        const int next = [&] { auto r = m.slot (3); r.load(); return r.next; }();
+        const bool atWrap = next % flashRing::pagesPerSector == 0;
+        if (atWrap || n % 23 == 0)
+        {
+            storeCut (2.0f, atWrap);
+            CHECK (m.load (3, loaded) && loaded[cutoff] == 1000.0f + float (n));
+            cuts += atWrap ? 100 : 1;
+        }
+    }
+    CHECK (cuts / 100 >= 1 && cuts % 100 >= 1); // both kinds of cut happened
+    CHECK (m.load (3, loaded) && loaded[cutoff] == 1069.0f);
+    CHECK (m.load (4, loaded) && loaded[cutoff] == 666.0f && m.lastSlot() == 31);
+    CHECK (FakeFlash::bytes[offset - 1] == 0x5A && FakeFlash::bytes[offset + patches::bytes] == 0x5A);
+}
+
 int main()
 {
     guiLines_();
@@ -536,7 +673,9 @@ int main()
     webSocket();
     synth();
     pages_();
+    patchButtons_();
     flashRing_();
+    patchMemory_();
     std::printf (failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
     return failures ? 1 : 0;
 }
