@@ -47,13 +47,13 @@ struct Vco
 
     // In MIDI notes (0.01 is a cent). Retunes at once, without a slide.
     void setNote (float key) noexcept;
-    // The same, reached by sliding across the next block (startBlock).
+    // The same, reached by sliding across the next tick (startBlock).
     void moveNote (float key) noexcept;
 
     // Cents from the note: TUNE, RANGE and TRANSPOSE.
     void setTune (float cents) noexcept;
 
-    // Once a block, before startBlock(): the LFO's share of the pitch, in cents.
+    // Once a tick, before startBlock(): the LFO's share of the pitch, in cents.
     void setModulation (float cents) noexcept;
 
     // 0 to 1, gliding over levelGlideSeconds.
@@ -66,7 +66,7 @@ struct Vco
     // it is the depth that source moves the width by.
     void setPulseWidth (float amount) noexcept;
 
-    // Once a block, before render(): steps the drift and slides to the new pitch across the block.
+    // Once a tick, before render(): steps the drift and slides to the new pitch across the tick.
     void startBlock (int frames) noexcept;
 
     // count samples of the corrected mix. widthMod is the PWM source (the LFO or the ADSR, 0 to 1), one
@@ -166,7 +166,7 @@ inline void Vco::setPulseWidth (float amount) noexcept
     width.setTarget (std::clamp (amount, 0.0f, 1.0f), static_cast<int> (0.005f * sampleRate));
 }
 
-// Retuned every block, moving or not, so the cost doesn't depend on modulation.
+// Retuned every tick, moving or not, so the cost doesn't depend on modulation.
 inline void Vco::startBlock (int frames) noexcept
 {
     drift.advance (frames);

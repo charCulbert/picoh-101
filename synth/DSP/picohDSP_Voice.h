@@ -201,11 +201,11 @@ inline void Voice::control (int frames) noexcept
     float twiceMiddle = 0.0f;
     for (int i = 0; i <= above; ++i)
     {
-        const auto level = ahead.next();
+        const float level = ahead.next();
         if (i == below)
-            twiceMiddle = float (level);
+            twiceMiddle = level;
         if (i == above)
-            twiceMiddle += float (level);
+            twiceMiddle += level;
     }
     filter.hold (twiceMiddle * halfSweepScale + cutoffSemitones, frames);
     late = false;
