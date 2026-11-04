@@ -14,7 +14,7 @@ The same code also runs as a CLAP plugin / WCLAP plugin, so you can play it with
 - The SH-101's basic architecture: one VCO (saw, pulse with PWM, sub oscillator, noise), a 24 dB ladder filter that self-oscillates, one ADSR, the LFO (triangle, square, random, noise), portamento (AUTO, ON, OFF) and the bender
 - Its playing: lowest- or last-note priority by ENV TRIG, the arpeggio (UP, U&D, DOWN), HOLD and KEY TRANSPOSE
 - The 100-step sequencer, loaded a key at a time with rests and ties, kept through power off
-- 32 patches on the Pico, one per key, kept through power off: press LOAD or STORE (PATCH), then a key. LOAD plays the key with its patch; STORE keeps the panel there. At power on, the patch last loaded or stored comes back; changes not stored don't
+- 32 patches on the Pico, one per key: press LOAD or STORE, then a key. They're kept through power off, and at power on the patch last loaded or stored comes back (changes not stored are lost)
 
 ## Hardware
 
