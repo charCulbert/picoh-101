@@ -195,8 +195,8 @@ void sendStateSlowly (bool& needs, void (*write) (const char*), bool (*room)())
         at = 0;
         return;
     }
-    // Every value, the keys that are down, then the sequencer and KEY TRANSPOSE.
-    const int keysEnd = params::count + 128, total = keysEnd + 2;
+    // Every value, the keys that are down, then the sequencer, KEY TRANSPOSE and the patch.
+    const int keysEnd = params::count + 128, total = keysEnd + 3;
     const auto& sequencer = guis->control->sequencer;
     char line[40];
     for (int sent = 0; sent < 4 && at < total && room(); ++at)
@@ -209,6 +209,8 @@ void sendStateSlowly (bool& needs, void (*write) (const char*), bool (*room)())
             guiLines::sequencerLine (line, sizeof line, sequencer.mode, sequencer.position, sequencer.length);
         else if (at == keysEnd + 1)
             guiLines::keyTransposeLine (line, sizeof line, sequencer.keyTranspose);
+        else if (at == keysEnd + 2)
+            guis->patchLine (line, sizeof line);
         else
             continue;
         write (line);
