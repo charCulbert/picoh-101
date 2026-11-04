@@ -27,13 +27,14 @@ A Raspberry Pi Pico 2 W and a PCM5102A DAC board (SCK to ground, power from the 
 | GP21 | DAC DIN |
 | GP9 | DIN MIDI in, through a 6N138 or H11L1 optocoupler (optional) |
 
-A Pico 2 without the Wi-Fi chip works too, over USB only.
+It runs on both chips: the RP2350 (Pico 2, Pico 2 W) and the RP2040 (the original Pico), which plays the same voice in fixed point. Wi-Fi needs the Pico 2 W; the others are USB only. There's no build for the Pico W (an RP2040 with the same Wi-Fi chip) because I didn't have one to test on, but adding it should be easy.
 
 ## Try it
 
 From [Releases](../../releases):
 
-- `PICOH-101-pico2_w.uf2`: the firmware. `PICOH-101-pico2.uf2` is for a Pico 2 without the radio.
+- `PICOH-101.uf2`: the firmware for a Pico or a Pico 2, USB only: one file for both chips.
+- `PICOH-101-W.uf2`: the firmware for the Pico 2 W, with Wi-Fi.
 - `PICOH-101-CLAP-macOS.zip`, `-Windows.zip`, `-Linux.zip`: the CLAP plugin. It isn't notarized, so on a Mac run `xattr -dr com.apple.quarantine PICOH-101.clap` after unzipping.
 - `PICOH-101.wclap.tar.gz`: the plugin for (browser) DAWs that load WCLAPs.
 
@@ -41,7 +42,7 @@ From [Releases](../../releases):
 
 - **Over Wi-Fi:** join the Pico's network `picoh-101` (password `picosynth`) and open http://192.168.4.1/, or http://picoh-101.local/ if it joined yours.
 - **Over USB,** from a clone of this repo: run `npm ci && npm run build` in `web/`, then `tools/serve.py`, open http://127.0.0.1:8460/ in Chrome, and choose **USB serial** or **USB MIDI**.
-- **In the Tauri iOS/macOS app,** if you built it: it finds the Pico on the cable, or else on Wi-Fi.
+- **In the Tauri iOS/macOS app,** if you built it: it finds the Pico on the cable, or else on Wi-Fi, and loads the panel from it (kept for next time, so a firmware update updates the app too).
 - **As a plugin:** load the CLAP in your DAW; its window is the same GUI.
 
 ## Build
@@ -54,7 +55,7 @@ Clone with `--recursive` to get the [Compost](https://github.com/charCulbert/com
 cmake -B build && cmake --build build --target flash
 ```
 
-After that, `--target flash` reboots it into its bootloader by itself (the flash script is macOS-only; elsewhere, copy `build/synth.uf2` onto the drive). To have it join your network instead of making its own, configure with `-DWIFI_SSID=... -DWIFI_PASSWORD=...`. For a Pico 2 without the radio, add `-DPICO_BOARD=pico2`.
+After that, `--target flash` reboots it into its bootloader by itself (the flash script is macOS-only; elsewhere, copy `build/synth.uf2` onto the drive). To have it join your network instead of making its own, configure with `-DWIFI_SSID=... -DWIFI_PASSWORD=...`. For a Pico 2 without the radio, add `-DPICO_BOARD=pico2`; for a Pico, `-DPICO_BOARD=pico`. The Pico and Pico 2 builds make one UF2 for both with `--target universal` in the Pico 2 build (needs picotool 2.2.0 or later).
 
 **The plugin:** `cd synth && cmake -B build && cmake --build build` makes `PICOH-101.clap`; `tools/build-wclap` makes the WCLAP (needs [WASI SDK](https://github.com/WebAssembly/wasi-sdk) 33 and Ninja).
 
