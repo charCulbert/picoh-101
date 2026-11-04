@@ -8,7 +8,7 @@
 
 namespace patches
 {
-constexpr int slots = 32, slotSectors = 2, lastSectors = 2;
+constexpr int slots = 32, slotSectors = 2, lastSectors = 4;
 constexpr uint32_t bytes = uint32_t (slots * slotSectors + lastSectors) * flashRing::sectorBytes;
 static_assert (params::count * sizeof (float) <= sizeof (flashRing::Page::data));
 
@@ -63,6 +63,20 @@ struct Memory
         Ring ring = last();
         const flashRing::Page* p = ring.load();
         return p && p->count == 1 && p->data[0] < slots ? p->data[0] : -1;
+    }
+
+    // At boot: erases what the next stores and loads will reach, so they only write a page.
+    void eraseAhead() const
+    {
+        Ring ring = last();
+        ring.load();
+        ring.eraseAhead();
+        for (int i = 0; i < slots; ++i)
+        {
+            ring = slot (i);
+            ring.load();
+            ring.eraseAhead();
+        }
     }
 
     flashRing::Saved remember (int i) const

@@ -1,4 +1,4 @@
-// Synth::setParameter, apart from Synth.cpp so it stays in flash on the Pico (Synth.cpp runs from RAM).
+// Synth::setParameter: each control into the voice.
 #include "Synth.h"
 #include <algorithm>
 #include "params.h"

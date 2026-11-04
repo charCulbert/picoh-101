@@ -489,7 +489,7 @@ static void sequencer_()
 // Flash as NOR: erase sets a sector to 0xFF, programming only clears bits.
 struct FakeFlash
 {
-    static inline uint8_t bytes[72 * flashRing::sectorBytes];
+    static inline uint8_t bytes[80 * flashRing::sectorBytes];
     static inline int erases = 0, programs = 0;
     static inline bool cutAfterErase = false; // power lost between the erase and the page
     static const uint8_t* at (uint32_t offset) { return bytes + offset; }
@@ -659,6 +659,17 @@ static void patchMemory_()
     CHECK (m.load (3, loaded) && loaded[cutoff] == 1069.0f);
     CHECK (m.load (4, loaded) && loaded[cutoff] == 666.0f && m.lastSlot() == 31);
     CHECK (FakeFlash::bytes[offset - 1] == 0x5A && FakeFlash::bytes[offset + patches::bytes] == 0x5A);
+
+    // After eraseAhead, the patches survive and the next 16 stores to a slot erase nothing.
+    m.eraseAhead();
+    CHECK (m.load (3, loaded) && loaded[cutoff] == 1069.0f && m.lastSlot() == 31);
+    const int erases = FakeFlash::erases;
+    for (int n = 0; n < 16; ++n)
+    {
+        panel[cutoff] = 2000.0f + float (n);
+        CHECK (m.store (3, panel) == flashRing::Saved::written);
+    }
+    CHECK (FakeFlash::erases == erases);
 }
 
 int main()

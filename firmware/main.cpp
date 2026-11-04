@@ -92,6 +92,7 @@ void loadSaved()
 {
     flashSaves::sequences.load();
     flashSaves::sequences.eraseAhead();
+    flashSaves::patchMemory.eraseAhead();
     const int slot = flashSaves::patchMemory.lastSlot();
     if (slot >= 0 && loadPatch (slot))
         control.patchSlot = slot;

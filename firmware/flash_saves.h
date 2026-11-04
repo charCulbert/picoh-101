@@ -30,7 +30,8 @@ struct PicoFlash
     {
         static_assert (flashRing::pageBytes == FLASH_PAGE_SIZE && flashRing::sectorBytes == FLASH_SECTOR_SIZE);
         const uint32_t programEnd = uint32_t (reinterpret_cast<uintptr_t> (&__flash_binary_end) - XIP_BASE);
-        if (! audio::flashFree() || offset < programEnd || offset % FLASH_PAGE_SIZE
+        const uint32_t lowest = eraseFirst ? offset & ~(FLASH_SECTOR_SIZE - 1) : offset;
+        if (! audio::flashFree() || lowest < programEnd || offset % FLASH_PAGE_SIZE
             || offset + FLASH_PAGE_SIZE > PICO_FLASH_SIZE_BYTES)
             return false;
         static struct
