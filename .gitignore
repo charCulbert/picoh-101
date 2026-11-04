@@ -2,7 +2,6 @@
 **/build-*/
 .DS_Store
 app/target/
-app/dist/
 app/node_modules/
 app/gen/apple/build/
 app/gen/schemas/
@@ -11,3 +10,4 @@ synth/build-wclap/
 firmware/.deps/
 web/dist/
 web/node_modules/
+app/permissions/

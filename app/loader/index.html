@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PICOH-101</title>
+<style>
+:root { color-scheme: light dark; --bg: #f4f2ee; --fg: #1d1c1a; --dim: #6b6862; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161514; --fg: #ece9e3; --dim: #9a968f; } }
+body { margin: 0; min-height: 100vh; display: grid; place-content: center; padding: 16px; box-sizing: border-box;
+       background: var(--bg); color: var(--fg); font: 16px/1.5 -apple-system, system-ui, sans-serif; text-align: center; }
+h1 { font-size: 22px; letter-spacing: .08em; margin: 0 0 8px; }
+p { margin: 4px 0; max-width: 32em; }
+#status { color: var(--dim); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+</style>
+<h1>PICOH-101</h1>
+<p>Connect a PICOH-101 with a USB cable, or join its Wi-Fi (picoh-101).</p>
+<p>The app loads the panel from the synth, then keeps it for next time.</p>
+<p id="status"></p>
+<script>window.picohStatus = (text) => { document.getElementById("status").textContent = text; };</script>

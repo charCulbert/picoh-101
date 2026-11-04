@@ -1,5 +1,5 @@
 //! The Pico's USB MIDI port through CoreMIDI (macOS and iOS): the GUI lines as SysEx
-//! (F0 7D 50 48 <line> F7), both ways.
+//! (F0 7D 50 48 <line> F7), both ways, and the page coming in (page.rs).
 
 use core_foundation_sys::base::{CFRelease, CFTypeRef};
 use core_foundation_sys::runloop::{kCFRunLoopDefaultMode, CFRunLoopRunInMode};
@@ -16,13 +16,13 @@ extern "C" {
     static kMIDIPropertyOffline: CFStringRef;
     fn MIDIEndpointGetEntity(e: Ref, out: *mut Ref) -> i32;
     fn MIDIEntityGetDevice(e: Ref, out: *mut Ref) -> i32;
+    fn MIDIEntityGetNumberOfDestinations(e: Ref) -> usize;
+    fn MIDIEntityGetDestination(e: Ref, i: usize) -> Ref;
     fn MIDIClientCreate(name: CFStringRef, notify: Option<extern "C" fn(*const c_void, *mut c_void)>, refcon: *mut c_void, out: *mut Ref) -> i32;
     fn MIDIInputPortCreate(client: Ref, name: CFStringRef, read: extern "C" fn(*const u8, *mut c_void, *mut c_void), refcon: *mut c_void, out: *mut Ref) -> i32;
     fn MIDIOutputPortCreate(client: Ref, name: CFStringRef, out: *mut Ref) -> i32;
     fn MIDIGetNumberOfSources() -> usize;
     fn MIDIGetSource(i: usize) -> Ref;
-    fn MIDIGetNumberOfDestinations() -> usize;
-    fn MIDIGetDestination(i: usize) -> Ref;
     fn MIDIObjectGetStringProperty(obj: Ref, prop: CFStringRef, out: *mut CFStringRef) -> i32;
     fn MIDIObjectGetIntegerProperty(obj: Ref, prop: CFStringRef, out: *mut i32) -> i32;
     fn MIDIPortConnectSource(port: Ref, src: Ref, refcon: *mut c_void) -> i32;
@@ -43,14 +43,17 @@ struct Ports {
     output: Ref,
 }
 
+type OnPage = std::sync::Arc<dyn Fn(u32, Vec<u8>) + Send + Sync>;
+
 /// Where the read callback puts what it gets: who wants the lines, and a SysEx message being gathered
 struct Rx {
     on_line: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>>,
+    on_page: Option<OnPage>,
     msg: Vec<u8>,
     inside: bool,
 }
 
-static RX: Mutex<Rx> = Mutex::new(Rx { on_line: None, msg: Vec::new(), inside: false });
+static RX: Mutex<Rx> = Mutex::new(Rx { on_line: None, on_page: None, msg: Vec::new(), inside: false });
 
 fn cfstr(s: &str) -> CFStringRef {
     unsafe { CFStringCreateWithBytes(std::ptr::null(), s.as_ptr(), s.len() as _, kCFStringEncodingUTF8, 0) }
@@ -126,13 +129,13 @@ extern "C" fn read(list: *const u8, _: *mut c_void, _: *mut c_void) {
         }
     }
     // Called without RX held: on_line takes the link's lock, which watch() holds while it calls listen and stop.
-    let on_line = rx.on_line.clone();
+    let (on_line, on_page) = (rx.on_line.clone(), rx.on_page.clone());
     drop(rx);
-    if let Some(on_line) = on_line {
-        for m in done {
-            if m.len() > SYSEX_ID.len() && m.starts_with(&SYSEX_ID) {
-                on_line(String::from_utf8_lossy(&m[SYSEX_ID.len()..m.len() - 1]).into_owned());
-            }
+    for m in done {
+        if let (Some(on_line), true) = (&on_line, m.len() > SYSEX_ID.len() && m.starts_with(&SYSEX_ID)) {
+            on_line(String::from_utf8_lossy(&m[SYSEX_ID.len()..m.len() - 1]).into_owned());
+        } else if let (Some(on_page), Some((offset, data))) = (&on_page, crate::page::decode_chunk(&m)) {
+            on_page(offset, data);
         }
     }
 }
@@ -162,14 +165,23 @@ fn ports() -> Option<&'static Ports> {
         .as_ref()
 }
 
-/// The Pico's MIDI port, if it's plugged in: (source, destination)
-pub fn find() -> Option<(Ref, Ref)> {
+/// A Pico's MIDI port, if one is plugged in: (source, destination), both of one device. The one in `keep`
+/// while it's still there, so the app stays on a board while another comes and goes.
+pub fn find(keep: Option<(Ref, Ref)>) -> Option<(Ref, Ref)> {
     ports()?;
-    unsafe {
-        let src = (0..MIDIGetNumberOfSources()).map(|i| MIDIGetSource(i)).find(|&e| is_pico(e))?;
-        let dst = (0..MIDIGetNumberOfDestinations()).map(|i| MIDIGetDestination(i)).find(|&e| is_pico(e))?;
-        Some((src, dst))
-    }
+    let picos: Vec<(Ref, Ref)> = unsafe {
+        (0..MIDIGetNumberOfSources())
+            .map(|i| MIDIGetSource(i))
+            .filter(|&src| is_pico(src))
+            .filter_map(|src| {
+                let mut entity = 0;
+                (MIDIEndpointGetEntity(src, &mut entity) == 0 && MIDIEntityGetNumberOfDestinations(entity) > 0)
+                    .then(|| (src, MIDIEntityGetDestination(entity, 0)))
+            })
+            .filter(|&(_, dst)| dst != 0 && is_pico(dst))
+            .collect()
+    };
+    keep.filter(|k| picos.contains(k)).or(picos.first().copied())
 }
 
 /// Sends one line to the Pico as SysEx
@@ -195,6 +207,11 @@ pub fn listen(src: Ref, on_line: std::sync::Arc<dyn Fn(String) + Send + Sync>) -
         rx.inside = false;
     }
     unsafe { MIDIPortConnectSource(p.input, src, std::ptr::null_mut()) == 0 }
+}
+
+/// Where the page's chunks go while it's being fetched (None: nowhere)
+pub fn on_page(handler: Option<OnPage>) {
+    RX.lock().unwrap().on_page = handler;
 }
 
 pub fn stop(src: Ref) {

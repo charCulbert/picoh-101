@@ -12,6 +12,7 @@ use tungstenite::{Message, WebSocket};
 const HOSTS: &[&str] = &["192.168.4.1", "picoh-101.local"];
 
 pub enum Event {
+    Page(crate::page::Fetched), // before Open: the page fetched from this Pico, if it's new
     Open,
     Line(String),
     Closed,
@@ -31,6 +32,9 @@ impl Wifi {
             while !running.load(Ordering::Relaxed) {
                 for host in HOSTS {
                     if let Some(socket) = connect(host) {
+                        if let Ok(address) = socket.get_ref().peer_addr() {
+                            on_event(Event::Page(crate::page::fetch_http(address, || !running.load(Ordering::Relaxed))));
+                        }
                         on_event(Event::Open);
                         talk(socket, &lines, &on_event, &running);
                         on_event(Event::Closed);
