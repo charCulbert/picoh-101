@@ -85,6 +85,7 @@ private:
     SmoothedValue<float> width;
     SubWave subWave = SubWave::octaveDown, nextSubWave = SubWave::octaveDown;
     int subCount = 0; // the phase's wraps, counted for the divider
+    bool pulseHigh = true; // the pulse at the end of the last sample
     uint32_t noiseState = 1;
     float key = 60.0f, tuneCents = 0.0f, modulationCents = 0.0f, sampleRate = 0.0f;
     bool rampPitch = false;
@@ -115,6 +116,7 @@ inline void Vco::prepare (double newSampleRate, size_t index) noexcept
     width.reset (width.getTarget());
     subCount = 0;
     subWave = nextSubWave;
+    pulseHigh = phasor.getPhase() < squareWidth;
     steps.clear();
     rampPitch = false;
 }
@@ -179,7 +181,8 @@ inline void Vco::startBlock (int frames) noexcept
 
 // Each wave jumps where the cycle restarts (the saw and pulse up by 2, the sub by its divider's step), and
 // the pulse falls by 2 at its width; all are timed within the sample from the phase, scaled by their
-// levels, and handed to the one correction. Noise needs none.
+// levels, and handed to the one correction. Noise needs none. The pulse steps only when it changes: a
+// width modulated faster than the phase moves can pass the phase, and then the step lands mid-sample.
 inline void Vco::render (float* __restrict out, int count, const float* __restrict widthMod) noexcept
 {
     for (int i = 0; i < count; ++i)
@@ -190,24 +193,30 @@ inline void Vco::render (float* __restrict out, int count, const float* __restri
         const float pulseWidth = squareWidth - (squareWidth - narrowestWidth) * amount;
         const float increment = phasor.getIncrement();
         const float start = phasor.getPhase();
-        const auto fallBetween = [&] (float from, float to, float offset)
+        const auto pulseOver = [&] (float from, float to, float offset)
         {
-            if (pulseWidth > from && pulseWidth <= to)
-                steps.addStep (offset + (pulseWidth - from) / increment, -2.0f * pulseLevel);
+            const bool high = to < pulseWidth;
+            if (high == pulseHigh)
+                return;
+            const bool crossed = pulseWidth > from && pulseWidth <= to;
+            steps.addStep (offset + (crossed ? pulseWidth - from : 0.5f * (to - from)) / increment,
+                           (high ? 2.0f : -2.0f) * pulseLevel);
+            pulseHigh = high;
         };
 
         steps.clear();
         if (! phasor.advanceAndCheckWrap (increment))
-            fallBetween (start, phasor.getPhase(), 0.0f);
+            pulseOver (start, phasor.getPhase(), 0.0f);
         else
         {
             const float wrapOffset = (1.0f - start) / increment;
-            fallBetween (start, 1.0f, 0.0f);
+            pulseOver (start, 1.0f, 0.0f);
             const float subBefore = subValue();
             subCount = (subCount + 1) & 3;
             subWave = nextSubWave;
             steps.addStep (wrapOffset, 2.0f * (sawLevel + pulseLevel) + (subValue() - subBefore) * subLevel);
-            fallBetween (0.0f, phasor.getPhase(), wrapOffset);
+            pulseHigh = true;
+            pulseOver (0.0f, phasor.getPhase(), wrapOffset);
         }
         phasor.slideIncrement();
 
@@ -215,7 +224,7 @@ inline void Vco::render (float* __restrict out, int count, const float* __restri
             correction.addStep (d.time, d.height);
         const float p = phasor.getPhase();
         const float mix =
-            sawLevel * (1.0f - 2.0f * p) + pulseLevel * (p < pulseWidth ? 1.0f : -1.0f) + subLevel * subValue();
+            sawLevel * (1.0f - 2.0f * p) + pulseLevel * (pulseHigh ? 1.0f : -1.0f) + subLevel * subValue();
         out[i] = correction.process (mix) + noiseLevel * nextNoise();
     }
 }
@@ -228,6 +237,7 @@ inline void Vco::skip (int frames) noexcept
     for (auto& level : levels)
         level.reset (level.getTarget());
     width.reset (width.getTarget());
+    pulseHigh = phasor.getPhase() < squareWidth - (squareWidth - narrowestWidth) * width.getTarget();
     steps.clear();
     correction.reset();
 }
