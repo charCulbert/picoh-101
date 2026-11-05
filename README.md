@@ -9,14 +9,6 @@ A monosynth inspired by the Roland SH-101, running on a Raspberry Pi Pico (2 W).
 
 The same code also runs as a CLAP plugin / WCLAP plugin, so you can play it without the hardware.
 
-Demo sounds from the RP2040
-
-https://github.com/user-attachments/assets/b8cc8008-10d5-4c51-9bc4-61905072cdf8
-
-https://github.com/user-attachments/assets/96ab278b-c46e-41d1-b2b5-f998826074a3
-
-https://github.com/user-attachments/assets/4490adee-9fee-4f69-a2b0-c42ab858eaa7
-
 ## Features
 
 - The SH-101's basic architecture: one VCO (saw, pulse with PWM, sub oscillator, noise), a 24 dB ladder filter that self-oscillates, one ADSR, the LFO (triangle, square, random, noise), portamento (AUTO, ON, OFF) and the bender
@@ -70,6 +62,17 @@ After that, `--target flash` reboots it into its bootloader by itself (the flash
 **The app** (optional, not in Releases): a native shell for the panel, for iPhone where browsers can't reach USB. `cd app && npm install && npx tauri ios build`, or `cargo run` on a Mac. You need Rust, Xcode and your own Apple dev team in `app/tauri.conf.json`.
 
 Opened in VS Code, the folder's tasks do all of this.
+
+
+## Demo Sounds
+
+Demo sounds from the RP2040
+
+https://github.com/user-attachments/assets/b8cc8008-10d5-4c51-9bc4-61905072cdf8
+
+https://github.com/user-attachments/assets/96ab278b-c46e-41d1-b2b5-f998826074a3
+
+https://github.com/user-attachments/assets/4490adee-9fee-4f69-a2b0-c42ab858eaa7
 
 ## License
 
