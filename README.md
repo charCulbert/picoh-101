@@ -1,4 +1,4 @@
-[punch-bass.mp3](https://github.com/user-attachments/files/34428734/punch-bass.mp3)# PICOH-101
+# PICOH-101
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-dark.png">
@@ -9,11 +9,13 @@ A monosynth inspired by the Roland SH-101, running on a Raspberry Pi Pico (2 W).
 
 The same code also runs as a CLAP plugin / WCLAP plugin, so you can play it without the hardware.
 
-
 Demo sounds from the RP2040
-[resonant-lead.mp3](https://github.com/user-attachments/files/34428743/resonant-lead.mp3)
-[punch-bass.mp3](https://github.com/user-attachments/files/34428742/punch-bass.mp3)
-[arp-loop.mp3](https://github.com/user-attachments/files/34428741/arp-loop.mp3)
+
+https://github.com/user-attachments/assets/b8cc8008-10d5-4c51-9bc4-61905072cdf8
+
+https://github.com/user-attachments/assets/96ab278b-c46e-41d1-b2b5-f998826074a3
+
+https://github.com/user-attachments/assets/4490adee-9fee-4f69-a2b0-c42ab858eaa7
 
 ## Features
 
