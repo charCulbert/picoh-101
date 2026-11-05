@@ -5,7 +5,7 @@
   <img alt="The PICOH-101 panel: modulator, VCO, source mixer, VCF, VCA and envelope sliders above the sequencer and arpeggio buttons and a keyboard" src="docs/images/panel-light.png">
 </picture>
 
-A monosynth inspired by the Roland SH-101, running on a Raspberry Pi Pico (2 W).
+A monosynth inspired by the Roland SH-101, for Raspberry Pi Pico boards (Pico, Pico 2, with and without Wifi support).
 
 The same code also runs as a CLAP plugin / WCLAP plugin, so you can play it without the hardware.
 
