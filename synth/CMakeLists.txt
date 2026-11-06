@@ -10,7 +10,7 @@ if(CMAKE_HOST_APPLE AND NOT CMAKE_SYSTEM_NAME AND NOT DEFINED CMAKE_OSX_ARCHITEC
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
 
-project(PICOH-101 VERSION 1.0.0 LANGUAGES C CXX)
+project(PICOH-101 VERSION 0.1.2 LANGUAGES C CXX) # the release tag is v<this>; CI checks they match
 if(APPLE)
     enable_language(OBJC OBJCXX)
 endif()
@@ -52,6 +52,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_
 
 add_library(PICOH-101_impl STATIC plugin.cpp Synth.cpp SynthParameters.cpp)
 target_include_directories(PICOH-101_impl PRIVATE ${elliptic_blep_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../protocol)
+target_compile_definitions(PICOH-101_impl PRIVATE PICOH_VERSION="${PROJECT_VERSION}") # the version hosts show
 core_add_to(PICOH-101_impl)
 webview_add_to(PICOH-101_impl)
 

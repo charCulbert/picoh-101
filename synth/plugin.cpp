@@ -114,7 +114,7 @@ static const clap_plugin_descriptor_t pluginDescriptor = {
     .url = "https://github.com/charCulbert/picoh-101",
     .manual_url = "",
     .support_url = "",
-    .version = "1.0.0",
+    .version = PICOH_VERSION,
     .description = "A monophonic synth inspired by the Roland SH-101",
     .features = pluginFeatures,
 };

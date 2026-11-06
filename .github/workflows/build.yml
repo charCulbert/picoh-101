@@ -173,6 +173,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version in synth/CMakeLists.txt
+        run: |
+          version=$(sed -nE 's/^project\(PICOH-101 VERSION ([0-9.]+).*/\1/p' synth/CMakeLists.txt)
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "::error::tag $GITHUB_REF_NAME but synth/CMakeLists.txt says $version"; exit 1; }
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
