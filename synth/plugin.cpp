@@ -899,6 +899,8 @@ static bool PluginReceiveMessage (MyPlugin* plugin, const core::Value& message)
     {
         plugin->mainParameters[i].store (PluginConstrain (i, line.value), std::memory_order_relaxed);
         plugin->mainChanged[i].store (true, std::memory_order_release);
+        // The GUI already shows it: a state load back to the earlier value must send it again.
+        plugin->shownValues[i] = PluginGetValue (plugin, i);
     }
     else
         (line.value > 0 ? plugin->gestureBegin[i] : plugin->gestureEnd[i]).store (true, std::memory_order_release);
